@@ -11,47 +11,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
   
-  <!-- ── Brevo Simple HTML styles ── -->
-  <style>
-    @font-face {
-      font-display: block;
-      font-family: Roboto;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/7529907e9eaf8ebb5220c5f9850e3811.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/25c678feafdc175a70922a116c9be3e7.woff) format("woff")
-    }
-
-    @font-face {
-      font-display: fallback;
-      font-family: Roboto;
-      font-weight: 600;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/6e9caeeafb1f3491be3e32744bc30440.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/71501f0d8d5aa95960f6475d5487d4c2.woff) format("woff")
-    }
-
-    @font-face {
-      font-display: fallback;
-      font-family: Roboto;
-      font-weight: 700;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/3ef7cf158f310cf752d5ad08cd0e7e60.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/ece3a1d82f18b60bcce0211725c476aa.woff) format("woff")
-    }
-
-    #sib-container input:-ms-input-placeholder {
-      text-align: left;
-      font-family: Helvetica, sans-serif;
-      color: #c0ccda;
-    }
-
-    #sib-container input::placeholder {
-      text-align: left;
-      font-family: Helvetica, sans-serif;
-      color: #c0ccda;
-    }
-
-    #sib-container a {
-      text-decoration: underline;
-      color: #2BB2FC;
-    }
-  </style>
-  <link rel="stylesheet" href="https://sibforms.com/forms/end-form/build/sib-styles.css">
-
   <style>
     * {
       margin: 0;
@@ -277,76 +236,28 @@
       text-decoration: underline;
     }
 
-    /* ── Custom styles for Brevo Simple Form ── */
+    /* ── ستايل لقسم الاشتراك مع iframe ── */
     #subscribe {
       background: white;
       text-align: center;
       padding: 60px 20px;
     }
 
-    .brevo-form-wrapper {
-      max-width: 500px;
-      margin: 0 auto;
+    .brevo-iframe-wrapper {
+      max-width: 600px;
+      margin: 40px auto;
       background: #f8fcff;
-      padding: 35px 25px;
+      padding: 20px;
       border-radius: 16px;
       box-shadow: 0 8px 30px rgba(122, 200, 192, 0.18);
       border: 1px solid rgba(122, 200, 192, 0.25);
     }
 
-    #sib-container {
-      font-family: 'Cairo', sans-serif !important;
-      direction: rtl;
-      text-align: right !important;
-    }
-
-    #sib-container .sib-form-block {
-      text-align: right !important;
-    }
-
-    #sib-container p,
-    #sib-container label,
-    #sib-container .entry__label,
-    #sib-container .entry__specification,
-    #sib-container .entry__error {
-      font-family: 'Cairo', sans-serif !important;
-      text-align: right !important;
-    }
-
-    #sib-container input {
+    iframe {
       width: 100%;
-      padding: 14px 16px;
-      border: 1px solid var(--primary);
-      border-radius: 10px;
-      font-size: 1.05rem;
-      font-family: 'Cairo', sans-serif;
-      background: white;
-      transition: border-color 0.3s;
-    }
-
-    #sib-container input:focus {
-      outline: none;
-      border-color: var(--primary-dark);
-      box-shadow: 0 0 0 3px rgba(122, 200, 192, 0.15);
-    }
-
-    #sib-container .sib-form-block__button {
-      width: 100%;
-      padding: 14px;
-      background: var(--primary) !important;
-      color: white !important;
-      border: none !important;
-      border-radius: 50px !important;
-      font-size: 1.1rem !important;
-      font-weight: 600 !important;
-      cursor: pointer;
-      transition: all 0.3s;
-      margin-top: 15px;
-    }
-
-    #sib-container .sib-form-block__button:hover {
-      background: var(--primary-dark) !important;
-      transform: translateY(-2px);
+      height: 450px; /* زدته عشان يظهر كامل */
+      border: none;
+      border-radius: 12px;
     }
 
     footer {
@@ -387,8 +298,14 @@
         left: auto;
       }
 
-      .brevo-form-wrapper {
-        padding: 25px 15px;
+      iframe {
+        height: 500px; /* أعلى شوية على الموبايل */
+      }
+    }
+
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .contact-details {
+        gap: 1.8rem 2.5rem;
       }
     }
   </style>
@@ -541,66 +458,20 @@
     </a>
   </section>
 
-  <!-- قسم الاشتراك في النشرة -->
+  <!-- قسم الاشتراك -->
   <section id="subscribe">
     <h2 data-ar="اشترك في نشرتنا البريدية" data-en="Subscribe to Our Newsletter">اشترك في نشرتنا البريدية</h2>
     <p data-ar="احصل على نصائح العناية بالأسنان والعروض الحصرية أولاً بأول" 
        data-en="Get dental care tips and exclusive offers first">احصل على نصائح العناية بالأسنان والعروض الحصرية أولاً بأول</p>
 
-    <div class="brevo-form-wrapper">
-      <!-- ── Brevo Simple HTML Form ── -->
-      <div class="sib-form" style="text-align: center; background-color: transparent;">
-        <div id="sib-form-container" class="sib-form-container">
-          <div id="sib-container" class="sib-container--medium sib-container--vertical" style="text-align:center; background-color:rgba(255,255,255,1); max-width:350px; border-radius:25px; border-width:1px; border-color:#C0CCD9; border-style:solid;">
-            <form id="sib-form" method="POST" action="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==">
-              <div style="padding: 8px 0;">
-                <div class="sib-form-block" style="font-size:32px; text-align:right; font-weight:700; font-family:Helvetica, sans-serif; color:#3C4858; background-color:transparent;">
-                  <p data-ar="النشرة البريدية" data-en="Newsletter">النشرة البريدية</p>
-                </div>
-              </div>
-              <div style="padding: 8px 0;">
-                <div class="sib-form-block" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#3C4858; background-color:transparent;">
-                  <div class="sib-text-form-block">
-                    <p data-ar="اشترك في نشرتنا لتبقى على اطلاع دائم." data-en="Subscribe to our newsletter and stay updated.">اشترك في نشرتنا لتبقى على اطلاع دائم.</p>
-                  </div>
-                </div>
-              </div>
-              <div style="padding: 8px 0;">
-                <div class="sib-input sib-form-block">
-                  <div class="form__entry entry_block">
-                    <div class="form__label-row">
-                      <label class="entry__label" style="font-weight: 700; text-align:right; font-size:16px; font-family:Helvetica, sans-serif; color:#3c4858;" for="EMAIL" data-required="*">
-                        <span data-ar="أدخل بريدك الإلكتروني" data-en="Enter your email address to subscribe">أدخل بريدك الإلكتروني</span>
-                      </label>
-                      <div class="entry__field">
-                        <input class="input" type="email" id="EMAIL" name="EMAIL" autocomplete="off" placeholder="example@email.com" data-required="true" required />
-                      </div>
-                    </div>
-                    <label class="entry__error entry__error--primary" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#661d1d; background-color:#ffeded; border-radius:3px; border-color:#ff4949;"></label>
-                    <label class="entry__specification" style="font-size:12px; text-align:right; font-family:Helvetica, sans-serif; color:#8390A4;">
-                      <span data-ar="أدخل عنوان بريدك الإلكتروني للاشتراك. مثال: abc@xyz.com" data-en="Provide your email address to subscribe. For e.g abc@xyz.com">أدخل عنوان بريدك الإلكتروني للاشتراك. مثال: abc@xyz.com</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-              <div style="padding: 8px 0;">
-                <div class="sib-form-block" style="text-align: right;">
-                  <button class="sib-form-block__button sib-form-block__button-with-loader" style="font-size:16px; text-align:center; font-weight:700; font-family:Helvetica, sans-serif; color:#FFFFFF; background-color:#3E4857; border-radius:3px; border-width:0px;" form="sib-form" type="submit">
-                    <svg class="icon clickable__icon progress-indicator__icon sib-hide-loader-icon" viewBox="0 0 512 512" style="">
-                      <path d="M460.116 373.846l-20.823-12.022c-5.541-3.199-7.54-10.159-4.663-15.874 30.137-59.886 28.343-131.652-5.386-189.946-33.641-58.394-94.896-95.833-161.827-99.676C261.028 55.961 256 50.751 256 44.352V20.309c0-6.904 5.808-12.337 12.703-11.982 83.556 4.306 160.163 50.864 202.11 123.677 42.063 72.696 44.079 162.316 6.031 236.832-3.14 6.148-10.75 8.461-16.728 5.01z" />
-                    </svg>
-                    <span data-ar="اشترك" data-en="SUBSCRIBE">اشترك</span>
-                  </button>
-                </div>
-              </div>
-              <input type="text" name="email_address_check" value="" class="input--hidden">
-              <input type="hidden" name="locale" value="ar">
-              <input type="hidden" name="html_type" value="simple">
-            </form>
-          </div>
-        </div>
-      </div>
-      <!-- End Brevo Form -->
+    <div class="brevo-iframe-wrapper">
+      <iframe 
+        src="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==" 
+        frameborder="0" 
+        scrolling="auto" 
+        allowfullscreen
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+      </iframe>
     </div>
   </section>
 
