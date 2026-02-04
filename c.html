@@ -10,29 +10,48 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
-
-  <!-- Brevo required styles -->
+  
+  <!-- ── Brevo Form Head Styles ── -->
   <style>
     @font-face {
       font-display: block;
       font-family: Roboto;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/7529907e9eaf8ebb5220c5f9850e3811.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/25c678feafdc175a70922a116c9be3e7.woff) format("woff")
+      src: url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/7529907e9eaf8ebb5220c5f9850e3811.woff2) format("woff2"),
+           url(https://assets.brevo.com/font/Roboto/Latin/normal/normal/25c678feafdc175a70922a116c9be3e7.woff) format("woff")
     }
     @font-face {
       font-display: fallback;
       font-family: Roboto;
       font-weight: 600;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/6e9caeeafb1f3491be3e32744bc30440.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/71501f0d8d5aa95960f6475d5487d4c2.woff) format("woff")
+      src: url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/6e9caeeafb1f3491be3e32744bc30440.woff2) format("woff2"),
+           url(https://assets.brevo.com/font/Roboto/Latin/medium/normal/71501f0d8d5aa95960f6475d5487d4c2.woff) format("woff")
     }
     @font-face {
       font-display: fallback;
       font-family: Roboto;
       font-weight: 700;
-      src: url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/3ef7cf158f310cf752d5ad08cd0e7e60.woff2) format("woff2"), url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/ece3a1d82f18b60bcce0211725c476aa.woff) format("woff")
+      src: url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/3ef7cf158f310cf752d5ad08cd0e7e60.woff2) format("woff2"),
+           url(https://assets.brevo.com/font/Roboto/Latin/bold/normal/ece3a1d82f18b60bcce0211725c476aa.woff) format("woff")
     }
-    #sib-container input:-ms-input-placeholder { text-align: right; font-family: 'Cairo', sans-serif; color: #aaa; }
-    #sib-container input::placeholder { text-align: right; font-family: 'Cairo', sans-serif; color: #aaa; }
-    #sib-container a { color: var(--primary); }
+
+    #sib-container input:-ms-input-placeholder {
+      text-align: right;
+      font-family: 'Cairo', sans-serif;
+      color: #a0aec0;
+    }
+    #sib-container input::placeholder {
+      text-align: right;
+      font-family: 'Cairo', sans-serif;
+      color: #a0aec0;
+    }
+    #sib-container textarea::placeholder {
+      text-align: right;
+      font-family: 'Cairo', sans-serif;
+      color: #a0aec0;
+    }
+    #sib-container a {
+      color: var(--primary);
+    }
   </style>
   <link rel="stylesheet" href="https://sibforms.com/forms/end-form/build/sib-styles.css">
 
@@ -216,6 +235,61 @@
       margin-bottom: 0.8rem;
     }
 
+    /* Newsletter section adjustments */
+    #newsletter {
+      background: var(--primary);
+      color: white;
+      text-align: center;
+    }
+
+    #newsletter h2 {
+      color: white;
+      margin-bottom: 1.5rem;
+    }
+
+    .newsletter-wrapper {
+      max-width: 580px;
+      margin: 0 auto;
+    }
+
+    .sib-form {
+      background: rgba(255,255,255,0.92) !important;
+      border-radius: 16px !important;
+      padding: 35px 25px !important;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+    }
+
+    .sib-form-block {
+      font-family: 'Cairo', sans-serif !important;
+    }
+
+    .sib-form-block p {
+      font-family: 'Cairo', sans-serif !important;
+    }
+
+    .sib-input .input {
+      font-family: 'Cairo', sans-serif;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 1.05rem;
+      direction: rtl;
+      text-align: right;
+    }
+
+    .sib-form-block__button {
+      font-family: 'Cairo', sans-serif !important;
+      border-radius: 50px !important;
+      padding: 14px 40px !important;
+      font-size: 1.1rem !important;
+      transition: all 0.3s;
+    }
+
+    .sib-form-block__button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    }
+
     #contact {
       background: var(--primary-darker);
       color: white;
@@ -269,46 +343,45 @@
       font-size: 0.95rem;
     }
 
-    /* Brevo form wrapper & overrides */
-    .brevo-wrapper {
-      max-width: 600px;
-      margin: 40px auto;
-      padding: 30px 20px;
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 8px 30px rgba(122,200,192,0.15);
-      border: 1px solid rgba(122,200,192,0.2);
-    }
-
-    #sib-container,
-    #sib-container * {
-      direction: rtl !important;
-      text-align: right !important;
-      font-family: 'Cairo', sans-serif !important;
-    }
-
-    #sib-container input,
-    #sib-container input::placeholder {
-      text-align: right !important;
-    }
-
-    #sib-container .sib-form-block__button {
-      background: var(--primary) !important;
-      border-radius: 50px !important;
-      width: 100% !important;
-      padding: 14px !important;
-      font-size: 1.1rem !important;
-      transition: background 0.3s;
-    }
-
-    #sib-container .sib-form-block__button:hover {
-      background: var(--primary-dark) !important;
-    }
-
-    .sib-form { background: transparent !important; }
-
     @media (max-width: 768px) {
-      .brevo-wrapper { padding: 20px 15px; margin: 30px auto; }
+      header h1 { font-size: 2.1rem; }
+      header { padding: 60px 15px 40px; }
+      section { padding: 60px 15px; }
+      h2 { font-size: 2rem; }
+      
+      .logo-img { max-width: 100px; }
+
+      .contact-details {
+        flex-direction: column;
+        gap: 1.8rem;
+        align-items: center;
+      }
+
+      .contact-details p {
+        font-size: 1.1rem;
+        justify-content: center;
+        white-space: normal;
+      }
+
+      .lang-switcher {
+        top: 15px;
+        left: 15px;
+      }
+
+      html[dir="ltr"] .lang-switcher {
+        right: 15px;
+        left: auto;
+      }
+
+      .sib-input .input {
+        font-size: 1rem;
+      }
+    }
+
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .contact-details {
+        gap: 1.8rem 2.5rem;
+      }
     }
   </style>
 
@@ -359,60 +432,137 @@
     <h2 data-ar="خدماتنا" data-en="Our Services">خدماتنا</h2>
     <div class="services-grid">
 
+      <!-- خدماتك هنا – لم يتم تغييرها -->
       <div class="service-card">
         <i class="fas fa-tooth"></i>
         <h3 data-ar="تنظيف وتلميع الأسنان" data-en="Teeth Cleaning & Polishing">تنظيف وتلميع الأسنان</h3>
-        <p data-ar="إزالة الجير والتصبغات لابتسامة ناصعة البياض."
-           data-en="Removal of tartar and stains for a bright white smile.">
-           إزالة الجير والتصبغات لابتسامة ناصعة البياض.
-        </p>
+        <p data-ar="إزالة الجير والتصبغات لابتسامة ناصعة البياض." data-en="Removal of tartar and stains for a bright white smile.">إزالة الجير والتصبغات لابتسامة ناصعة البياض.</p>
       </div>
 
       <div class="service-card">
         <i class="fas fa-syringe"></i>
         <h3 data-ar="حشوات وعلاج العصب" data-en="Fillings & Root Canal Treatment">حشوات وعلاج العصب</h3>
-        <p data-ar="علاجات دقيقة باستخدام تقنيات حديثة بدون ألم."
-           data-en="Precise treatments using modern techniques with no pain.">
-           علاجات دقيقة باستخدام تقنيات حديثة بدون ألم.
-        </p>
+        <p data-ar="علاجات دقيقة باستخدام تقنيات حديثة بدون ألم." data-en="Precise treatments using modern techniques with no pain.">علاجات دقيقة باستخدام تقنيات حديثة بدون ألم.</p>
       </div>
 
       <div class="service-card">
         <i class="fas fa-smile-beam"></i>
         <h3 data-ar="تركيبات وتجميل الأسنان" data-en="Prosthodontics & Cosmetic Dentistry">تركيبات وتجميل الأسنان</h3>
-        <p data-ar="عدسات أسنان، تيجان زركون، هوليوود سمايل."
-           data-en="Veneers, Zirconia crowns, Hollywood Smile.">
-           عدسات أسنان، تيجان زركون، هوليوود سمايل.
-        </p>
+        <p data-ar="عدسات أسنان، تيجان زركون، هوليوود سمايل." data-en="Veneers, Zirconia crowns, Hollywood Smile.">عدسات أسنان، تيجان زركون، هوليوود سمايل.</p>
       </div>
 
       <div class="service-card">
         <i class="fas fa-teeth"></i>
         <h3 data-ar="تقويم الأسنان" data-en="Orthodontics">تقويم الأسنان</h3>
-        <p data-ar="تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين."
-           data-en="Correction of misaligned teeth and jaws using the latest types: metal, clear, lingual, Invisalign.">
-           تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين.
-        </p>
+        <p data-ar="تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين." data-en="Correction of misaligned teeth and jaws using the latest types: metal, clear, lingual, Invisalign.">تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين.</p>
       </div>
 
       <div class="service-card">
         <i class="fas fa-screwdriver"></i>
         <h3 data-ar="زراعة الأسنان" data-en="Dental Implants">زراعة الأسنان</h3>
-        <p data-ar="زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً."
-           data-en="High-quality fixed dental implants with zirconia or Emax crowns for natural, long-lasting results.">
-           زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً.
-        </p>
+        <p data-ar="زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً." data-en="High-quality fixed dental implants with zirconia or Emax crowns for natural, long-lasting results.">زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً.</p>
       </div>
 
       <div class="service-card">
         <i class="fas fa-child"></i>
         <h3 data-ar="طب أسنان الأطفال" data-en="Pediatric Dentistry">طب أسنان الأطفال</h3>
-        <p data-ar="رعاية لطيفة وممتعة لصغار السن."
-           data-en="Gentle and enjoyable care for young children.">
-           رعاية لطيفة وممتعة لصغار السن.
-        </p>
+        <p data-ar="رعاية لطيفة وممتعة لصغار السن." data-en="Gentle and enjoyable care for young children.">رعاية لطيفة وممتعة لصغار السن.</p>
       </div>
 
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════
+       قسم النشرة الإخبارية – Newsletter
+  ════════════════════════════════════════════ -->
+  <section id="newsletter">
+    <div class="newsletter-wrapper">
+      <h2 data-ar="اشترك في النشرة الإخبارية" data-en="Subscribe to Our Newsletter">اشترك في النشرة الإخبارية</h2>
+      <p data-ar="احصل على نصائح العناية بالأسنان والعروض الحصرية أولاً" 
+         data-en="Get dental care tips and exclusive offers first">احصل على نصائح العناية بالأسنان والعروض الحصرية أولاً</p>
+
+      <!-- Brevo Form – تم تعديل الألوان والمسافات فقط -->
+      <div class="sib-form" style="text-align: center; background-color: #7bc8c0;">
+        <div id="sib-form-container" class="sib-form-container">
+          <div id="error-message" class="sib-form-message-panel" style="font-size:16px; text-align:right; font-family:'Cairo',sans-serif; color:#661d1d; background-color:#ffeded; border-radius:8px; border-color:#ff4949;max-width:540px;">
+            <div class="sib-form-message-panel__text sib-form-message-panel__text--center">
+              <svg viewBox="0 0 512 512" class="sib-icon sib-notification__icon">
+                <path d="M256 40c118.621 0 216 96.075 216 216 0 119.291-96.61 216-216 216-119.244 0-216-96.562-216-216 0-119.203 96.602-216 216-216m0-32C119.043 8 8 119.083 8 256c0 136.997 111.043 248 248 248s248-111.003 248-248C504 119.083 392.957 8 256 8zm-11.49 120h22.979c6.823 0 12.274 5.682 11.99 12.5l-7 168c-.268 6.428-5.556 11.5-11.99 11.5h-8.979c-6.433 0-11.722-5.073-11.99-11.5l-7-168c-.283-6.818 5.167-12.5 11.99-12.5zM256 340c-15.464 0-28 12.536-28 28s12.536 28 28 28 28-12.536 28-28-12.536-28-28-28z" />
+              </svg>
+              <span class="sib-form-message-panel__inner-text">تعذر حفظ الاشتراك. حاول مرة أخرى.</span>
+            </div>
+          </div>
+          <div></div>
+          <div id="success-message" class="sib-form-message-panel" style="font-size:16px; text-align:right; font-family:'Cairo',sans-serif; color:#085229; background-color:#e7faf0; border-radius:8px; border-color:#13ce66;max-width:540px;">
+            <div class="sib-form-message-panel__text sib-form-message-panel__text--center">
+              <svg viewBox="0 0 512 512" class="sib-icon sib-notification__icon">
+                <path d="M256 8C119.033 8 8 119.033 8 256s111.033 248 248 248 248-111.033 248-248S392.967 8 256 8zm0 464c-118.664 0-216-96.055-216-216 0-118.663 96.055-216 216-216 118.664 0 216 96.055 216 216 0 118.663-96.055 216-216 216zm141.63-274.961L217.15 376.071c-4.705 4.667-12.303 4.637-16.97-.068l-85.878-86.572c-4.667-4.705-4.637-12.303.068-16.97l8.52-8.451c4.705-4.667 12.303-4.637 16.97.068l68.976 69.533 163.441-162.13c4.705-4.667 12.303-4.637 16.97.068l8.451 8.52c4.668 4.705 4.637 12.303-.068 16.97z" />
+              </svg>
+              <span class="sib-form-message-panel__inner-text">تم الاشتراك بنجاح!</span>
+            </div>
+          </div>
+          <div></div>
+
+          <div id="sib-container" class="sib-container--large sib-container--vertical" style="text-align:center; background-color:rgba(255,255,255,1); max-width:540px; border-radius:16px; border-width:0; direction:rtl">
+            <form id="sib-form" method="POST" action="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==" data-type="subscription">
+              
+              <div style="padding: 12px 0;">
+                <div class="sib-form-block" style="font-size:1.8rem; font-weight:700; color:var(--primary-darker);">
+                  <p data-ar="النشرة الإخبارية" data-en="Newsletter">النشرة الإخبارية</p>
+                </div>
+              </div>
+
+              <div style="padding: 8px 0 20px;">
+                <div class="sib-form-block" style="font-size:1.15rem; color:#444;">
+                  <p data-ar="اشترك لتصلك نصائح العناية بالأسنان والعروض الحصرية أولاً" 
+                     data-en="Subscribe to get dental care tips and exclusive offers first">
+                     اشترك لتصلك نصائح العناية بالأسنان والعروض الحصرية أولاً
+                  </p>
+                </div>
+              </div>
+
+              <div style="padding: 10px 0;">
+                <div class="sib-input sib-form-block">
+                  <input class="input" maxlength="200" type="text" id="FIRSTNAME" name="FIRSTNAME" autocomplete="off" 
+                         placeholder="الاسم" data-required="true" required />
+                </div>
+              </div>
+
+              <div style="padding: 10px 0;">
+                <div class="sib-input sib-form-block">
+                  <input class="input" type="email" id="EMAIL" name="EMAIL" autocomplete="off" 
+                         placeholder="البريد الإلكتروني" data-required="true" required />
+                </div>
+              </div>
+
+              <div style="padding: 10px 0 20px;">
+                <div class="sib-sms-field sib-form-block">
+                  <div class="sib-sms-input-wrapper" style="direction:rtl">
+                    <div class="sib-sms-input" data-placeholder="اختياري" data-country-code="EG" data-attributename="SMS">
+                      <select class="input" name="SMS__COUNTRY_CODE" style="width:auto; margin-left:8px;">
+                        <option value="+20" selected>+20 مصر</option>
+                        <!-- يمكنك الإبقاء على باقي الدول أو حذفها حسب رغبتك -->
+                      </select>
+                      <input type="tel" class="input" id="SMS" name="SMS" autocomplete="off" placeholder="رقم الجوال (اختياري)" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="padding: 12px 0;">
+                <button class="sib-form-block__button sib-form-block__button-with-loader" 
+                        style="background-color:#0bbe45; border-radius:50px; padding:14px 50px; font-size:1.1rem;" 
+                        form="sib-form" type="submit">
+                  اشترك الآن
+                </button>
+              </div>
+
+              <input type="text" name="email_address_check" value="" class="input--hidden">
+              <input type="hidden" name="locale" value="ar">
+            </form>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -425,37 +575,15 @@
     </p>
     
     <div class="contact-details">
-      <p><i class="fas fa-phone"></i> 
-        <span data-ar="01223387614" data-en="0122 338 7614">01223387614</span>
-      </p>
-      <p><i class="fas fa-map-marker-alt"></i> 
-        <span data-ar="٦٤ المحور المركزي – مدينة ٦ أكتوبر"
-              data-en="64 Central Axis – 6th of October City">
-              ٦٤ المحور المركزي – مدينة ٦ أكتوبر
-        </span>
-      </p>
-      <p><i class="far fa-clock"></i> 
-        <span data-ar="يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)"
-              data-en="Daily from 2 PM to 10 PM (except Friday)">
-              يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)
-        </span>
-      </p>
-      <p>
-        <i class="fas fa-envelope"></i> 
-        <a href="mailto:info@dramrclinic.online" 
-           data-ar="info@dramrclinic.online"
-           data-en="info@dramrclinic.online">
-           info@dramrclinic.online
-        </a>
-      </p>
+      <p><i class="fas fa-phone"></i> <span data-ar="01223387614" data-en="0122 338 7614">01223387614</span></p>
+      <p><i class="fas fa-map-marker-alt"></i> <span data-ar="٦٤ المحور المركزي – مدينة ٦ أكتوبر" data-en="64 Central Axis – 6th of October City">٦٤ المحور المركزي – مدينة ٦ أكتوبر</span></p>
+      <p><i class="far fa-clock"></i> <span data-ar="يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)" data-en="Daily from 2 PM to 10 PM (except Friday)">يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)</span></p>
+      <p><i class="fas fa-envelope"></i> <a href="mailto:info@dramrclinic.online">info@dramrclinic.online</a></p>
     </div>
 
     <a href="https://wa.me/201223387614?text=مرحبا،%20أود%20حجز%20موعد%20أو%20الاستفسار%20عن%20خدمة%20في%20العيادة" 
-       target="_blank" 
-       class="btn btn-whatsapp" 
-       style="margin-top: 2rem;"
-       data-ar="تواصل عبر واتساب"
-       data-en="Contact via WhatsApp">
+       target="_blank" class="btn btn-whatsapp" style="margin-top: 2.5rem;" 
+       data-ar="تواصل عبر واتساب" data-en="Contact via WhatsApp">
        تواصل عبر واتساب
     </a>
   </section>
@@ -467,85 +595,6 @@
     </p>
   </footer>
 
-  <!-- نموذج الاشتراك في النهاية بدون عنوان -->
-  <div class="brevo-wrapper">
-    <div class="sib-form" style="text-align: center; background-color: transparent;">
-      <div id="sib-form-container" class="sib-form-container">
-        <div id="sib-container" class="sib-container--large sib-container--vertical" style="text-align:center; background-color:rgba(255,255,255,1); max-width:540px; border-radius:25px; border-width:1px; border-color:#C0CCD9; border-style:solid;">
-          <form id="sib-form" method="POST" action="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==">
-            <div style="padding: 8px 0;">
-              <div class="sib-form-block" style="font-size:32px; text-align:center; font-weight:700; font-family:Helvetica, sans-serif; color:#3C4858; background-color:transparent; text-align:center">
-                <p data-ar="النشرة البريدية" data-en="Newsletter">النشرة البريدية</p>
-              </div>
-            </div>
-            <div style="padding: 8px 0;">
-              <div class="sib-form-block" style="font-size:16px; text-align:center; font-weight:700; font-family:Helvetica, sans-serif; color:#3C4858; background-color:transparent; text-align:center">
-                <div class="sib-text-form-block">
-                  <p data-ar="اشترك لتحصل على نصائح العناية بالأسنان والعروض الحصرية أولاً" data-en="Subscribe to get dental care tips and exclusive offers first">اشترك لتحصل على نصائح العناية بالأسنان والعروض الحصرية أولاً</p>
-                </div>
-              </div>
-            </div>
-            <div style="padding: 8px 0;">
-              <div class="sib-input sib-form-block">
-                <div class="form__entry entry_block">
-                  <div class="form__label-row ">
-                    <div class="entry__field">
-                      <input class="input " maxlength="200" type="text" id="FIRSTNAME" name="FIRSTNAME" autocomplete="off" placeholder="الاسم الأول" data-required="true" required />
-                    </div>
-                  </div>
-                  <label class="entry__error entry__error--primary" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#661d1d; background-color:#ffeded; border-radius:3px; border-color:#ff4949;"></label>
-                  <label class="entry__specification" style="font-size:12px; text-align:right; font-family:Helvetica, sans-serif; color:#8390A4; text-align:right">
-                    <span data-ar="حقل اختياري – يمكنك تركه فارغاً" data-en="Optional field – you can leave it blank">حقل اختياري – يمكنك تركه فارغاً</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div style="padding: 8px 0;">
-              <div class="sib-input sib-form-block">
-                <div class="form__entry entry_block">
-                  <div class="form__label-row ">
-                    <div class="entry__field">
-                      <input class="input " type="email" id="EMAIL" name="EMAIL" autocomplete="off" placeholder="البريد الإلكتروني" data-required="true" required />
-                    </div>
-                  </div>
-                  <label class="entry__error entry__error--primary" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#661d1d; background-color:#ffeded; border-radius:3px; border-color:#ff4949;"></label>
-                  <label class="entry__specification" style="font-size:12px; text-align:right; font-family:Helvetica, sans-serif; color:#8390A4; text-align:right">
-                    <span data-ar="أدخل بريدك الإلكتروني للاشتراك. مثال: name@example.com" data-en="Provide your email address to subscribe. For e.g abc@xyz.com">أدخل بريدك الإلكتروني للاشتراك. مثال: name@example.com</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div style="padding: 8px 0;">
-              <div class="sib-form-block" style="text-align: center;">
-                <button class="sib-form-block__button sib-form-block__button-with-loader" style="font-size:16px; font-weight:700; font-family:Helvetica, sans-serif; color:#FFFFFF; background-color:#3E4857; border-radius:20px; border-width:0px;" form="sib-form" type="submit">
-                  <svg class="icon clickable__icon progress-indicator__icon sib-hide-loader-icon" viewBox="0 0 512 512" style="">
-                    <path d="M460.116 373.846l-20.823-12.022c-5.541-3.199-7.54-10.159-4.663-15.874 30.137-59.886 28.343-131.652-5.386-189.946-33.641-58.394-94.896-95.833-161.827-99.676C261.028 55.961 256 50.751 256 44.352V20.309c0-6.904 5.808-12.337 12.703-11.982 83.556 4.306 160.163 50.864 202.11 123.677 42.063 72.696 44.079 162.316 6.031 236.832-3.14 6.148-10.75 8.461-16.728 5.01z" />
-                  </svg>
-                  <span data-ar="اشترك" data-en="SUBSCRIBE">اشترك</span>
-                </button>
-              </div>
-            </div>
-            <input type="text" name="email_address_check" value="" class="input--hidden">
-            <input type="hidden" name="locale" value="ar">
-            <input type="hidden" name="html_type" value="simple">
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Brevo script at the bottom -->
-  <script>
-    window.REQUIRED_CODE_ERROR_MESSAGE = 'يرجى اختيار رمز البلد';
-    window.LOCALE = 'ar';
-    window.EMAIL_INVALID_MESSAGE = window.SMS_INVALID_MESSAGE = "المعلومات المقدمة غير صالحة";
-    window.REQUIRED_ERROR_MESSAGE = "لا يمكن ترك هذا الحقل فارغاً";
-    window.GENERIC_INVALID_MESSAGE = "المعلومات المقدمة غير صالحة";
-    var AUTOHIDE = Boolean(0);
-  </script>
-  <script defer src="https://sibforms.com/forms/end-form/build/main.js"></script>
-
-  <!-- Language switch script -->
   <script>
     const langToggle = document.getElementById('langToggle');
     let currentLang = localStorage.getItem('lang') || 'ar';
@@ -574,6 +623,17 @@
       setLanguage(newLang);
     });
   </script>
+
+  <!-- Brevo form script -->
+  <script>
+    window.REQUIRED_CODE_ERROR_MESSAGE = 'يرجى اختيار كود الدولة';
+    window.LOCALE = 'ar';
+    window.EMAIL_INVALID_MESSAGE = window.SMS_INVALID_MESSAGE = "المعلومات المدخلة غير صحيحة";
+    window.REQUIRED_ERROR_MESSAGE = "هذا الحقل مطلوب";
+    window.GENERIC_INVALID_MESSAGE = "المعلومات المدخلة غير صحيحة";
+    var AUTOHIDE = Boolean(0);
+  </script>
+  <script defer src="https://sibforms.com/forms/end-form/build/main.js"></script>
 
 </body>
 </html>
