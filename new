@@ -236,6 +236,31 @@
       text-decoration: underline;
     }
 
+    /* ── ستايل جديد لقسم الاشتراك ── */
+    #subscribe {
+      background: white;
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    #subscribe h2 {
+      color: var(--primary-darker);
+    }
+
+    #subscribe .form-container {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    iframe {
+      width: 100%;
+      max-width: 540px;
+      height: 320px;          /* زدت الارتفاع شوية عشان يظهر كويس */
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
     footer {
       background: #1a1a1a;
       color: #aaa;
@@ -272,6 +297,10 @@
       html[dir="ltr"] .lang-switcher {
         right: 15px;
         left: auto;
+      }
+
+      iframe {
+        height: 340px;  /* أعلى شوية على الموبايل */
       }
     }
 
@@ -329,7 +358,6 @@
     <h2 data-ar="خدماتنا" data-en="Our Services">خدماتنا</h2>
     <div class="services-grid">
 
-      <!-- 1 -->
       <div class="service-card">
         <i class="fas fa-tooth"></i>
         <h3 data-ar="تنظيف وتلميع الأسنان" data-en="Teeth Cleaning & Polishing">تنظيف وتلميع الأسنان</h3>
@@ -339,7 +367,6 @@
         </p>
       </div>
 
-      <!-- 2 -->
       <div class="service-card">
         <i class="fas fa-syringe"></i>
         <h3 data-ar="حشوات وعلاج العصب" data-en="Fillings & Root Canal Treatment">حشوات وعلاج العصب</h3>
@@ -349,7 +376,6 @@
         </p>
       </div>
 
-      <!-- 3 -->
       <div class="service-card">
         <i class="fas fa-smile-beam"></i>
         <h3 data-ar="تركيبات وتجميل الأسنان" data-en="Prosthodontics & Cosmetic Dentistry">تركيبات وتجميل الأسنان</h3>
@@ -359,7 +385,6 @@
         </p>
       </div>
 
-      <!-- 4 -->
       <div class="service-card">
         <i class="fas fa-teeth"></i>
         <h3 data-ar="تقويم الأسنان" data-en="Orthodontics">تقويم الأسنان</h3>
@@ -369,7 +394,6 @@
         </p>
       </div>
 
-      <!-- 5 -->
       <div class="service-card">
         <i class="fas fa-screwdriver"></i>
         <h3 data-ar="زراعة الأسنان" data-en="Dental Implants">زراعة الأسنان</h3>
@@ -379,7 +403,6 @@
         </p>
       </div>
 
-      <!-- 6 - آخر خدمة دلوقتي: طب أسنان الأطفال -->
       <div class="service-card">
         <i class="fas fa-child"></i>
         <h3 data-ar="طب أسنان الأطفال" data-en="Pediatric Dentistry">طب أسنان الأطفال</h3>
@@ -436,6 +459,24 @@
     </a>
   </section>
 
+  <!-- ── قسم الاشتراك في النشرة ── -->
+  <section id="subscribe">
+    <h2 data-ar="اشترك في نشرتنا البريدية" data-en="Subscribe to Our Newsletter">اشترك في نشرتنا البريدية</h2>
+    <p data-ar="احصل على نصائح العناية بالأسنان وآخر العروض أولاً بأول" 
+       data-en="Get dental care tips and exclusive offers first">احصل على نصائح العناية بالأسنان وآخر العروض أولاً بأول</p>
+    
+    <div class="form-container" style="margin-top: 2.5rem;">
+      <iframe 
+        width="540" 
+        height="320" 
+        src="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==" 
+        frameborder="0" 
+        scrolling="auto" 
+        allowfullscreen>
+      </iframe>
+    </div>
+  </section>
+
   <footer>
     <p data-ar="© 2026 عيادة دكتور عمرو لطب وتجميل الأسنان – جميع الحقوق محفوظة"
        data-en="© 2026 Dr. Amr Dental & Cosmetic Clinic – All Rights Reserved">
@@ -471,8 +512,6 @@
       setLanguage(newLang);
     });
   </script>
-
-<iframe width="540" height="305" src="https://1187b3e9.sibforms.com/serve/MUIFAOyzmIWq5FeH3OdQIthHEi5b1nV97XyFWB4peA7kag18_VadONpDEIkkW14hNELwlS40SCsQ5aKBq0xrF8Da0RSClHjka9D0XrCKHdULfF92a70Q6vOd_b-ZIotK87wHWOpkOXHEuuUWHoyXCkpsWW17K-aSs-4mr6zlyJD3qbmv_OUlSJdSrXkugHK0NB771R5rWdQjXh7Fvg==" frameborder="0" scrolling="auto" allowfullscreen style="display: block;margin-left: auto;margin-right: auto;max-width: 100%;"></iframe>
 
 </body>
 </html>
