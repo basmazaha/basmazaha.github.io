@@ -1,1 +1,22 @@
+title: عيادة دكتور عمرو لطب وتجميل الأسنان | Dr Amr Dental Clinic
 
+baseurl: ""
+url: "https://yourusername.github.io"   # غيريها لاسم الـ repo أو الدومين الفعلي
+
+timezone: Africa/Cairo
+
+defaults:
+  - scope:
+      path: "ar"
+    values:
+      lang: ar
+      direction: rtl
+      other_lang_url: /en/
+      other_lang_text: English
+  - scope:
+      path: "en"
+    values:
+      lang: en
+      direction: ltr
+      other_lang_url: /ar/
+      other_lang_text: العربية
