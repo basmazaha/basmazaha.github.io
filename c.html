@@ -37,8 +37,17 @@
   <link rel="stylesheet" href="https://sibforms.com/forms/end-form/build/sib-styles.css">
 
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Cairo', sans-serif; line-height: 1.6; color: #333; background: #f9f9f9; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Cairo', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: #f9f9f9;
+    }
 
     :root {
       --primary: #7ac8c0;
@@ -50,14 +59,221 @@
       --whatsapp-dark: #1da851;
     }
 
-    /* باقي ستايل الصفحة الأصلي (header, buttons, sections, cards, contact, footer) */
-    /* ... أضفي هنا كل الـ CSS الأصلي الخاص بك ... */
+    header {
+      background: white;
+      color: var(--primary-darker);
+      text-align: center;
+      padding: 70px 20px 50px;
+      border-bottom: 1px solid rgba(122, 200, 192, 0.18);
+      position: relative;
+    }
 
-    /* تعديلات لنموذج Brevo */
+    .lang-switcher {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+    }
+
+    .lang-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 30px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    .lang-btn:hover {
+      background: var(--primary-dark);
+    }
+
+    html[dir="ltr"] .lang-switcher {
+      left: auto;
+      right: 20px;
+    }
+
+    .logo-container {
+      margin-bottom: 1.8rem;
+    }
+
+    .logo-img {
+      max-width: 140px;
+      height: auto;
+      display: block;
+      margin: 0 auto;
+    }
+
+    header h1 {
+      font-size: 2.8rem;
+      margin-bottom: 0.9rem;
+      color: var(--primary-darker);
+    }
+
+    header p {
+      font-size: 1.3rem;
+      margin-bottom: 2.2rem;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+      color: var(--gray);
+    }
+
+    .btn {
+      display: inline-block;
+      background: var(--primary);
+      color: white;
+      padding: 14px 36px;
+      border-radius: 50px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1.1rem;
+      transition: all 0.3s;
+    }
+
+    .btn:hover {
+      background: var(--primary-dark);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    }
+
+    .btn-whatsapp {
+      background: var(--whatsapp);
+      color: white;
+    }
+
+    .btn-whatsapp:hover {
+      background: var(--whatsapp-dark);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    }
+
+    section {
+      padding: 80px 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h2 {
+      text-align: center;
+      font-size: 2.5rem;
+      margin-bottom: 3rem;
+      color: var(--primary-darker);
+    }
+
+    #about { background: white; }
+
+    .about-content {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 40px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .about-text {
+      flex: 1;
+      min-width: 300px;
+    }
+
+    .about-text h3 {
+      color: var(--primary);
+      margin-bottom: 1rem;
+    }
+
+    #services .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 30px;
+    }
+
+    .service-card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+      transition: transform 0.3s, box-shadow 0.3s;
+      text-align: center;
+      padding: 35px 20px;
+    }
+
+    .service-card:hover {
+      transform: translateY(-10px);
+      box-shadow: 0 15px 35px rgba(122,200,192,0.25);
+    }
+
+    .service-card i {
+      font-size: 3.8rem;
+      color: var(--primary);
+      margin-bottom: 1.2rem;
+    }
+
+    .service-card h3 {
+      color: var(--primary-darker);
+      margin-bottom: 0.8rem;
+    }
+
+    #contact {
+      background: var(--primary-darker);
+      color: white;
+      text-align: center;
+    }
+
+    #contact .info {
+      font-size: 1.25rem;
+      margin: 1.8rem 0 2.5rem;
+    }
+
+    .contact-details {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 2rem 3.5rem;
+      margin: 2rem auto;
+      max-width: 1100px;
+    }
+
+    .contact-details p {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      font-size: 1.15rem;
+      white-space: nowrap;
+    }
+
+    .contact-details i {
+      font-size: 1.6rem;
+      min-width: 32px;
+      text-align: center;
+    }
+
+    .contact-details a {
+      color: #e0fffc;
+      text-decoration: none;
+    }
+
+    .contact-details a:hover {
+      color: var(--primary);
+      text-decoration: underline;
+    }
+
+    footer {
+      background: #1a1a1a;
+      color: #aaa;
+      text-align: center;
+      padding: 25px;
+      font-size: 0.95rem;
+    }
+
+    /* Brevo form wrapper & overrides */
     .brevo-wrapper {
       max-width: 600px;
-      margin: 60px auto 40px;
-      padding: 30px;
+      margin: 40px auto;
+      padding: 30px 20px;
       background: white;
       border-radius: 16px;
       box-shadow: 0 8px 30px rgba(122,200,192,0.15);
@@ -71,31 +287,28 @@
       font-family: 'Cairo', sans-serif !important;
     }
 
-    #sib-container input {
+    #sib-container input,
+    #sib-container input::placeholder {
       text-align: right !important;
-      direction: rtl !important;
-      padding-right: 15px !important;
-      padding-left: 15px !important;
     }
 
     #sib-container .sib-form-block__button {
       background: var(--primary) !important;
       border-radius: 50px !important;
-      padding: 14px 0 !important;
-      font-size: 1.1rem !important;
       width: 100% !important;
+      padding: 14px !important;
+      font-size: 1.1rem !important;
+      transition: background 0.3s;
     }
 
     #sib-container .sib-form-block__button:hover {
       background: var(--primary-dark) !important;
     }
 
-    /* إخفاء الخلفية الخضراء */
-    .sib-form { background-color: transparent !important; }
+    .sib-form { background: transparent !important; }
 
-    /* تعديل حجم ومسافات على الموبايل */
     @media (max-width: 768px) {
-      .brevo-wrapper { padding: 20px; margin: 40px auto 30px; }
+      .brevo-wrapper { padding: 20px 15px; margin: 30px auto; }
     }
   </style>
 
@@ -103,26 +316,148 @@
 </head>
 <body>
 
-  <!-- محتوى الصفحة الأصلي: lang switcher + header + about + services + contact -->
-
   <div class="lang-switcher">
     <button class="lang-btn" id="langToggle">English</button>
   </div>
 
   <header>
-    <!-- ... محتوى الهيدر الأصلي ... -->
+    <div class="logo-container">
+      <img src="https://raw.githubusercontent.com/sosnowrain/sosnowrain.github.io/main/Logo.png" alt="DR AMR CLINIC" class="logo-img">
+    </div>
+    <h1 data-ar="عيادة دكتور عمرو لطب وتجميل الأسنان"
+       data-en="DR AMR CLINIC">عيادة دكتور عمرو لطب وتجميل الأسنان</h1>
+    <p data-ar="رعاية أسنان احترافية بأحدث التقنيات وبأسعار مناسبة – ابتسامتك مسئوليتنا"
+       data-en="Professional dental care using the latest technologies at reasonable prices – Your Smile Is Our Responsibility">
+       رعاية أسنان احترافية بأحدث التقنيات وبأسعار مناسبة – ابتسامتك مسئوليتنا
+    </p>
+    <a href="#contact" class="btn" 
+       data-ar="احجز موعد الآن"
+       data-en="Book Now">احجز موعد الآن</a>
   </header>
 
   <section id="about">
-    <!-- ... محتوى عنا ... -->
+    <h2 data-ar="من نحن" data-en="About Us">من نحن</h2>
+    <div class="about-content">
+      <div class="about-text">
+        <h3 data-ar="نخبة من أطباء الأسنان المتخصصين في مختلف مجالات طب الأسنان"
+            data-en="A selected group of specialized dentists in various dental fields">
+            نخبة من أطباء الأسنان المتخصصين في مختلف مجالات طب الأسنان
+        </h3>
+        <p data-ar="نقدم خدمات أسنان متكاملة في جو هادئ ومريح، باستخدام أحدث الأجهزة والمواد العالمية."
+           data-en="We provide comprehensive dental services in a calm and comfortable environment, using the latest global equipment and materials.">
+           نقدم خدمات أسنان متكاملة في جو هادئ ومريح، باستخدام أحدث الأجهزة والمواد العالمية.
+        </p>
+        <p data-ar="نسعى لتقديم تجربة مريحة ونتائج ممتازة لكل مريض."
+           data-en="We strive to provide a comfortable experience and excellent results for every patient.">
+           نسعى لتقديم تجربة مريحة ونتائج ممتازة لكل مريض.
+        </p>
+      </div>
+    </div>
   </section>
 
   <section id="services">
-    <!-- ... خدمات ... -->
+    <h2 data-ar="خدماتنا" data-en="Our Services">خدماتنا</h2>
+    <div class="services-grid">
+
+      <div class="service-card">
+        <i class="fas fa-tooth"></i>
+        <h3 data-ar="تنظيف وتلميع الأسنان" data-en="Teeth Cleaning & Polishing">تنظيف وتلميع الأسنان</h3>
+        <p data-ar="إزالة الجير والتصبغات لابتسامة ناصعة البياض."
+           data-en="Removal of tartar and stains for a bright white smile.">
+           إزالة الجير والتصبغات لابتسامة ناصعة البياض.
+        </p>
+      </div>
+
+      <div class="service-card">
+        <i class="fas fa-syringe"></i>
+        <h3 data-ar="حشوات وعلاج العصب" data-en="Fillings & Root Canal Treatment">حشوات وعلاج العصب</h3>
+        <p data-ar="علاجات دقيقة باستخدام تقنيات حديثة بدون ألم."
+           data-en="Precise treatments using modern techniques with no pain.">
+           علاجات دقيقة باستخدام تقنيات حديثة بدون ألم.
+        </p>
+      </div>
+
+      <div class="service-card">
+        <i class="fas fa-smile-beam"></i>
+        <h3 data-ar="تركيبات وتجميل الأسنان" data-en="Prosthodontics & Cosmetic Dentistry">تركيبات وتجميل الأسنان</h3>
+        <p data-ar="عدسات أسنان، تيجان زركون، هوليوود سمايل."
+           data-en="Veneers, Zirconia crowns, Hollywood Smile.">
+           عدسات أسنان، تيجان زركون، هوليوود سمايل.
+        </p>
+      </div>
+
+      <div class="service-card">
+        <i class="fas fa-teeth"></i>
+        <h3 data-ar="تقويم الأسنان" data-en="Orthodontics">تقويم الأسنان</h3>
+        <p data-ar="تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين."
+           data-en="Correction of misaligned teeth and jaws using the latest types: metal, clear, lingual, Invisalign.">
+           تصحيح اعوجاج الأسنان والفكين بأحدث الأنواع: معدني، شفاف، داخلي، إنفزلاين.
+        </p>
+      </div>
+
+      <div class="service-card">
+        <i class="fas fa-screwdriver"></i>
+        <h3 data-ar="زراعة الأسنان" data-en="Dental Implants">زراعة الأسنان</h3>
+        <p data-ar="زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً."
+           data-en="High-quality fixed dental implants with zirconia or Emax crowns for natural, long-lasting results.">
+           زراعة أسنان ثابتة عالية الجودة مع تيجان زركون أو إيماكس لنتائج طبيعية تدوم طويلاً.
+        </p>
+      </div>
+
+      <div class="service-card">
+        <i class="fas fa-child"></i>
+        <h3 data-ar="طب أسنان الأطفال" data-en="Pediatric Dentistry">طب أسنان الأطفال</h3>
+        <p data-ar="رعاية لطيفة وممتعة لصغار السن."
+           data-en="Gentle and enjoyable care for young children.">
+           رعاية لطيفة وممتعة لصغار السن.
+        </p>
+      </div>
+
+    </div>
   </section>
 
   <section id="contact">
-    <!-- ... تواصل معنا ... -->
+    <h2 data-ar="تواصل معنا" data-en="Contact Us">تواصل معنا</h2>
+    <p class="info" 
+       data-ar="احجز موعدك الآن أو استفسر عن أي خدمة"
+       data-en="Book your appointment now or inquire about any service">
+       احجز موعدك الآن أو استفسر عن أي خدمة
+    </p>
+    
+    <div class="contact-details">
+      <p><i class="fas fa-phone"></i> 
+        <span data-ar="01223387614" data-en="0122 338 7614">01223387614</span>
+      </p>
+      <p><i class="fas fa-map-marker-alt"></i> 
+        <span data-ar="٦٤ المحور المركزي – مدينة ٦ أكتوبر"
+              data-en="64 Central Axis – 6th of October City">
+              ٦٤ المحور المركزي – مدينة ٦ أكتوبر
+        </span>
+      </p>
+      <p><i class="far fa-clock"></i> 
+        <span data-ar="يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)"
+              data-en="Daily from 2 PM to 10 PM (except Friday)">
+              يومياً من 2 ظهراً إلى 10 مساءً (ما عدا الجمعة)
+        </span>
+      </p>
+      <p>
+        <i class="fas fa-envelope"></i> 
+        <a href="mailto:info@dramrclinic.online" 
+           data-ar="info@dramrclinic.online"
+           data-en="info@dramrclinic.online">
+           info@dramrclinic.online
+        </a>
+      </p>
+    </div>
+
+    <a href="https://wa.me/201223387614?text=مرحبا،%20أود%20حجز%20موعد%20أو%20الاستفسار%20عن%20خدمة%20في%20العيادة" 
+       target="_blank" 
+       class="btn btn-whatsapp" 
+       style="margin-top: 2rem;"
+       data-ar="تواصل عبر واتساب"
+       data-en="Contact via WhatsApp">
+       تواصل عبر واتساب
+    </a>
   </section>
 
   <footer>
@@ -132,9 +467,8 @@
     </p>
   </footer>
 
-  <!-- نموذج Brevo في نهاية الصفحة بدون عنوان -->
+  <!-- نموذج الاشتراك في النهاية بدون عنوان -->
   <div class="brevo-wrapper">
-    <!-- Begin Brevo Form -->
     <div class="sib-form" style="text-align: center; background-color: transparent;">
       <div id="sib-form-container" class="sib-form-container">
         <div id="sib-container" class="sib-container--large sib-container--vertical" style="text-align:center; background-color:rgba(255,255,255,1); max-width:540px; border-radius:25px; border-width:1px; border-color:#C0CCD9; border-style:solid;">
@@ -161,7 +495,7 @@
                   </div>
                   <label class="entry__error entry__error--primary" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#661d1d; background-color:#ffeded; border-radius:3px; border-color:#ff4949;"></label>
                   <label class="entry__specification" style="font-size:12px; text-align:right; font-family:Helvetica, sans-serif; color:#8390A4; text-align:right">
-                    يمكنك تخصيص هذا النص الاختياري قبل نشر النموذج.
+                    <span data-ar="حقل اختياري – يمكنك تركه فارغاً" data-en="Optional field – you can leave it blank">حقل اختياري – يمكنك تركه فارغاً</span>
                   </label>
                 </div>
               </div>
@@ -176,7 +510,7 @@
                   </div>
                   <label class="entry__error entry__error--primary" style="font-size:16px; text-align:right; font-family:Helvetica, sans-serif; color:#661d1d; background-color:#ffeded; border-radius:3px; border-color:#ff4949;"></label>
                   <label class="entry__specification" style="font-size:12px; text-align:right; font-family:Helvetica, sans-serif; color:#8390A4; text-align:right">
-                    أدخل بريدك الإلكتروني للاشتراك. مثال: name@example.com
+                    <span data-ar="أدخل بريدك الإلكتروني للاشتراك. مثال: name@example.com" data-en="Provide your email address to subscribe. For e.g abc@xyz.com">أدخل بريدك الإلكتروني للاشتراك. مثال: name@example.com</span>
                   </label>
                 </div>
               </div>
@@ -198,10 +532,9 @@
         </div>
       </div>
     </div>
-    <!-- End Brevo Form -->
   </div>
 
-  <!-- Brevo script (مهم جداً ليعمل النموذج بدون مشاكل) -->
+  <!-- Brevo script at the bottom -->
   <script>
     window.REQUIRED_CODE_ERROR_MESSAGE = 'يرجى اختيار رمز البلد';
     window.LOCALE = 'ar';
@@ -212,7 +545,7 @@
   </script>
   <script defer src="https://sibforms.com/forms/end-form/build/main.js"></script>
 
-  <!-- كود تغيير اللغة -->
+  <!-- Language switch script -->
   <script>
     const langToggle = document.getElementById('langToggle');
     let currentLang = localStorage.getItem('lang') || 'ar';
