@@ -135,6 +135,3 @@ footer { background: #1a1a1a; color: #aaa; text-align: center; padding: 25px; fo
   .contact-details { gap: 1.8rem 2.5rem; }
 }
 
-iframe {
-  overflow: hidden !important;
-}
