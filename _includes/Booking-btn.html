@@ -1,0 +1,14 @@
+<!-- _includes/booking-button.html -->
+
+<button id="book-appointment-btn" 
+        class="btn cal-popup-btn"
+        data-cal-link="dramrclinic/hagz?attendeePhoneNumber=+20"
+        data-cal-config='{"layout":"month_view"}'>
+
+  {% if page.lang == 'ar' or page.url contains '/ar/' %}
+    احجز موعد الآن
+  {% else %}
+    Book Now
+  {% endif %}
+
+</button>
