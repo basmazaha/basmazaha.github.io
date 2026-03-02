@@ -1,0 +1,116 @@
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false },
+  global: { headers: { "x-client-info": "check-booked-times" } },
+});
+
+Deno.serve(async (req: Request) => {
+  try {
+    if (req.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    if (req.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+    }
+
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { date, query_type = "booked_times" } = body ?? {};
+
+    // ─── التحقق الأساسي من التاريخ ───
+    if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      return new Response(
+        JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ─── دعم نوعين من الاستعلامات ───
+    if (query_type === "off_days") {
+      // جلب جميع الأيام المعطلة (بدون الحاجة لـ date في هذه الحالة)
+      const { data, error } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", new Date().toISOString().split("T")[0])   // فقط المستقبلية
+        .order("date", { ascending: true });
+
+      if (error) {
+        console.error("Off days query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في جلب الأيام المعطلة" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const off_days = (data || []).map(row => row.date);
+      return new Response(JSON.stringify({ off_days }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── الاستعلام الافتراضي: الحجوزات في يوم معين ───
+    if (query_type === "booked_times" || !query_type) {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("appointment_time")
+        .eq("appointment_date", date);
+
+      if (error) {
+        console.error("Booked times query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في قاعدة البيانات" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const booked = (Array.isArray(data) ? data : [])
+        .map(row => row?.appointment_time?.substring(0, 5))
+        .filter(Boolean);
+
+      return new Response(JSON.stringify({ booked }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // إذا أرسل query_type غير مدعوم
+    return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    console.error("Edge Function error:", err?.stack ?? err);
+    return new Response(
+      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
