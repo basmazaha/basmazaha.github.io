@@ -40,6 +40,23 @@ Deno.serve(async (req: Request) => {
   );
 
   // ────────────────────────────────────────────────
+  // دالة لتنسيق التاريخ بالصيغة العربية (مصر)
+  // ────────────────────────────────────────────────
+  function formatArabicDate(isoDate: string | null | undefined): string | null {
+    if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
+
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return null;
+
+    return date.toLocaleDateString("ar-EG", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: EGYPT_TZ,
+    });
+  }
+
+  // ────────────────────────────────────────────────
   // حساب النافذة الزمنية الحالية (محلي – مصر)
   // ────────────────────────────────────────────────
   const nowLocal = new Date().toLocaleString("en-US", { timeZone: EGYPT_TZ });
@@ -52,7 +69,7 @@ Deno.serve(async (req: Request) => {
   // جلب المواعيد المرشحة (التي لم يُرسل لها تذكير بعد)
   // ────────────────────────────────────────────────
   const { data: appointments, error } = await supabase
-    .from("appointments")  // ← غيّر الاسم إذا كان جدولك مختلف
+    .from("appointments")
     .select(`
       id,
       full_name,
@@ -94,9 +111,7 @@ Deno.serve(async (req: Request) => {
       const timeStr = ap.appointment_time?.trim() || "00:00:00";
       const dateTimeStr = `${ap.appointment_date}T${timeStr.padEnd(8, ":00")}`;
 
-      // ننشئ كائن Date بالتوقيت المحلي (نفترض أن السيرفر يعمل بتوقيت UTC لكننا نحدد TZ)
       const appointmentDate = new Date(dateTimeStr);
-      // لضمان التوقيت المحلي، نعيد تعيينه باستخدام timeZone
       const appointmentLocal = new Date(appointmentDate.toLocaleString("en-US", { timeZone: EGYPT_TZ }));
 
       // تجاهل إذا كان خارج النافذة
@@ -105,8 +120,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // ────────────────────────────────────────────────
-      // تنسيق الوقت للعرض (نفس القيمة المخزنة + تنسيق عربي/إنجليزي)
-      // لأن الوقت مخزن محلي → لا نحتاج تحويل إضافي
+      // تنسيق الوقت للعرض
       // ────────────────────────────────────────────────
       let formattedTimeAr = "غير محدد";
       let formattedTimeEn = "Not specified";
@@ -119,7 +133,7 @@ Deno.serve(async (req: Request) => {
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
-          timeZone: EGYPT_TZ  // للدقة فقط (غير ضروري كثيراً هنا)
+          timeZone: EGYPT_TZ
         });
 
         formattedTimeEn = dummyDate.toLocaleTimeString("en-US", {
@@ -147,7 +161,7 @@ Deno.serve(async (req: Request) => {
 
   <table style="width:100%; margin:20px 0; border-collapse:collapse;">
     <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; width:140px; border:1px solid #e0e0e0;">الاسم</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.full_name || "غير محدد"}</td></tr>
-    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">التاريخ</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.appointment_date || "غير محدد"}</td></tr>
+    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">التاريخ</td><td style="padding:12px; border:1px solid #e0e0e0;">${formatArabicDate(ap.appointment_date) || "غير محدد"}</td></tr>
     <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">الوقت</td><td style="padding:12px; border:1px solid #e0e0e0;">${formattedTimeAr}</td></tr>
     <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">السبب</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.reason || "غير محدد"}</td></tr>
   </table>
