@@ -1,116 +1,243 @@
-import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+send-appointment-reminders
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+// ────────────────────────────────────────────────────────────────
+// Edge Function: send-appointment-reminders
+// الغرض: إرسال تذكير قبل ~6 ساعات من الموعد عبر Brevo
+// ملاحظة: appointment_time مخزن بالتوقيت المحلي (مصر) مباشرة
+// ────────────────────────────────────────────────────────────────
 
-const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
-  auth: { persistSession: false },
-  global: { headers: { "x-client-info": "check-booked-times" } },
-});
+const BREVO_API_KEY   = Deno.env.get("BREVO_API_KEY");
+const APP_BASE_URL    = (Deno.env.get("APP_BASE_URL") || "https://test-e08.pages.dev/").replace(/\/+$/, "");
+const REMINDER_SECRET = Deno.env.get("REMINDER_SECRET");
+
+// توقيت مصر – نستخدمه فقط للمقارنات الزمنية الدقيقة إذا لزم الأمر
+const EGYPT_TZ = "Africa/Cairo";
+
+if (!BREVO_API_KEY || !REMINDER_SECRET) {
+  console.error("Missing required environment variables");
+  Deno.serve(() => new Response(
+    JSON.stringify({ error: "Server misconfiguration – missing env vars" }),
+    { status: 500, headers: { "Content-Type": "application/json" } }
+  ));
+}
 
 Deno.serve(async (req: Request) => {
-  try {
-    if (req.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
+  // حماية بسيطة ضد الاستدعاء غير المصرح
+  if (req.headers.get("x-reminder-secret") !== REMINDER_SECRET) {
+    return new Response("Unauthorized", { status: 401 });
+  }
 
-    if (req.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-    }
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
 
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return new Response(JSON.stringify({ error: "Bad JSON body" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  // ────────────────────────────────────────────────
+  // إعداد Supabase client
+  // ────────────────────────────────────────────────
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
 
-    const { date, query_type = "booked_times" } = body ?? {};
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
 
-    // ─── التحقق الأساسي من التاريخ ───
-    if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
-      return new Response(
-        JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+  // ────────────────────────────────────────────────
+  // حساب النافذة الزمنية الحالية (محلي – مصر)
+  // ────────────────────────────────────────────────
+  const nowLocal = new Date().toLocaleString("en-US", { timeZone: EGYPT_TZ });
+  const now = new Date(nowLocal);
 
-    // ─── دعم نوعين من الاستعلامات ───
-    if (query_type === "off_days") {
-      // جلب جميع الأيام المعطلة (بدون الحاجة لـ date في هذه الحالة)
-      const { data, error } = await supabase
-        .from("off_days")
-        .select("date")
-        .gte("date", new Date().toISOString().split("T")[0])   // فقط المستقبلية
-        .order("date", { ascending: true });
+  const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+  const windowEnd     = new Date(now.getTime() + 6 * 60 * 60 * 1000 + 15 * 60 * 1000); // نافذة أمان
 
-      if (error) {
-        console.error("Off days query error:", error);
-        return new Response(JSON.stringify({ error: "خطأ في جلب الأيام المعطلة" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+  // ────────────────────────────────────────────────
+  // جلب المواعيد المرشحة (التي لم يُرسل لها تذكير بعد)
+  // ────────────────────────────────────────────────
+  const { data: appointments, error } = await supabase
+    .from("appointments")  // ← غيّر الاسم إذا كان جدولك مختلف
+    .select(`
+      id,
+      full_name,
+      email,
+      appointment_date,
+      appointment_time,
+      reason,
+      manage_token,
+      reminder_sent_6h
+    `)
+    .eq("reminder_sent_6h", false)
+    .gte("appointment_date", now.toISOString().split("T")[0])
+    .lte("appointment_date", sixHoursLater.toISOString().split("T")[0])
+    .order("appointment_date", { ascending: true });
 
-      const off_days = (data || []).map(row => row.date);
-      return new Response(JSON.stringify({ off_days }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // ─── الاستعلام الافتراضي: الحجوزات في يوم معين ───
-    if (query_type === "booked_times" || !query_type) {
-      if (!date) {
-        return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("appointment_time")
-        .eq("appointment_date", date);
-
-      if (error) {
-        console.error("Booked times query error:", error);
-        return new Response(JSON.stringify({ error: "خطأ في قاعدة البيانات" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const booked = (Array.isArray(data) ? data : [])
-        .map(row => row?.appointment_time?.substring(0, 5))
-        .filter(Boolean);
-
-      return new Response(JSON.stringify({ booked }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // إذا أرسل query_type غير مدعوم
-    return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-
-  } catch (err) {
-    console.error("Edge Function error:", err?.stack ?? err);
+  if (error) {
+    console.error("Supabase fetch error:", error);
     return new Response(
-      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: "فشل الاستعلام من قاعدة البيانات" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
+
+  if (!appointments || appointments.length === 0) {
+    return new Response(
+      JSON.stringify({ message: "لا توجد تذكيرات مستحقة الآن" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const sent   : string[] = [];
+  const failed : string[] = [];
+
+  for (const ap of appointments) {
+    try {
+      // ────────────────────────────────────────────────
+      // بناء وقت الموعد بالتوقيت المحلي (كما مخزن في الجدول)
+      // ────────────────────────────────────────────────
+      const timeStr = ap.appointment_time?.trim() || "00:00:00";
+      const dateTimeStr = `${ap.appointment_date}T${timeStr.padEnd(8, ":00")}`;
+
+      // ننشئ كائن Date بالتوقيت المحلي (نفترض أن السيرفر يعمل بتوقيت UTC لكننا نحدد TZ)
+      const appointmentDate = new Date(dateTimeStr);
+      // لضمان التوقيت المحلي، نعيد تعيينه باستخدام timeZone
+      const appointmentLocal = new Date(appointmentDate.toLocaleString("en-US", { timeZone: EGYPT_TZ }));
+
+      // تجاهل إذا كان خارج النافذة
+      if (appointmentLocal < now || appointmentLocal > windowEnd) {
+        continue;
+      }
+
+      // ────────────────────────────────────────────────
+      // تنسيق الوقت للعرض (نفس القيمة المخزنة + تنسيق عربي/إنجليزي)
+      // لأن الوقت مخزن محلي → لا نحتاج تحويل إضافي
+      // ────────────────────────────────────────────────
+      let formattedTimeAr = "غير محدد";
+      let formattedTimeEn = "Not specified";
+
+      if (ap.appointment_time && ap.appointment_time.trim() !== "") {
+        const cleanTime = ap.appointment_time.slice(0, 5); // HH:MM
+        const dummyDate = new Date(`1970-01-01T${cleanTime}:00`);
+
+        formattedTimeAr = dummyDate.toLocaleTimeString("ar-EG", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: EGYPT_TZ  // للدقة فقط (غير ضروري كثيراً هنا)
+        });
+
+        formattedTimeEn = dummyDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: EGYPT_TZ
+        });
+      }
+
+      // ────────────────────────────────────────────────
+      // روابط إدارة الحجز
+      // ────────────────────────────────────────────────
+      const manageLinkAr = `${APP_BASE_URL}/manage/${ap.manage_token}`;
+      const manageLinkEn = `${APP_BASE_URL}/en/manage/${ap.manage_token}`;
+
+      // ────────────────────────────────────────────────
+      // محتوى الإيميل (تذكير)
+      // ────────────────────────────────────────────────
+      const htmlContent = `
+<div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px;">
+  <h2 style="color: #1a3c5e; text-align: center; margin-bottom: 24px;">تذكير بموعدك القادم</h2>
+  <p style="font-size: 16px; color: #333; line-height: 1.6;">مرحباً ${ap.full_name || "السيد/السيدة"}،</p>
+  <p style="font-size: 16px; color: #333; line-height: 1.6;">موعدك في العيادة سيكون قريباً:</p>
+
+  <table style="width:100%; margin:20px 0; border-collapse:collapse;">
+    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; width:140px; border:1px solid #e0e0e0;">الاسم</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.full_name || "غير محدد"}</td></tr>
+    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">التاريخ</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.appointment_date || "غير محدد"}</td></tr>
+    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">الوقت</td><td style="padding:12px; border:1px solid #e0e0e0;">${formattedTimeAr}</td></tr>
+    <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">السبب</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.reason || "غير محدد"}</td></tr>
+  </table>
+
+  <div style="margin:32px 0; padding:20px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; text-align:center;">
+    <p style="font-weight:bold; color:#1e40af; margin:0 0 16px; font-size:1.1rem;">إدارة الموعد</p>
+    <a href="${manageLinkAr}" style="display:inline-block; padding:14px 32px; background:#3b82f6; color:white; text-decoration:none; border-radius:8px; font-weight:bold; font-size:1.1rem;">
+      إدارة حجزي الآن
+    </a>
+  </div>
+
+  <hr style="border:none; border-top:1px solid #e0e0e0; margin:40px 0;">
+
+  <div dir="ltr">
+    <h2 style="color:#1a3c5e; text-align:center; margin-bottom:24px;">Appointment Reminder</h2>
+    <p style="font-size:16px; color:#333; line-height:1.6;">Hello ${ap.full_name || "Dear Patient"},</p>
+    <p style="font-size:16px; color:#333; line-height:1.6;">Your appointment is coming up soon:</p>
+
+    <table style="width:100%; margin:20px 0; border-collapse:collapse;">
+      <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; width:140px; border:1px solid #e0e0e0;">Name</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.full_name || "Not specified"}</td></tr>
+      <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Date</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.appointment_date || "Not specified"}</td></tr>
+      <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Time</td><td style="padding:12px; border:1px solid #e0e0e0;">${formattedTimeEn}</td></tr>
+      <tr><td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Reason</td><td style="padding:12px; border:1px solid #e0e0e0;">${ap.reason || "Not specified"}</td></tr>
+    </table>
+
+    <div style="margin:32px 0; padding:20px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; text-align:center;">
+      <p style="font-weight:bold; color:#1e40af; margin:0 0 16px; font-size:1.1rem;">Manage Appointment</p>
+      <a href="${manageLinkEn}" style="display:inline-block; padding:14px 32px; background:#3b82f6; color:white; text-decoration:none; border-radius:8px; font-weight:bold; font-size:1.1rem;">
+        Manage Booking
+      </a>
+    </div>
+  </div>
+</div>`;
+
+      // ────────────────────────────────────────────────
+      // إرسال عبر Brevo
+      // ────────────────────────────────────────────────
+      const payload = {
+        sender: { name: "عيادة د. عمرو", email: "info@dramrclinic.online" },
+        to: [{ email: ap.email, name: ap.full_name || "العميل" }],
+        subject: "تذكير: موعدك بعد حوالي 6 ساعات | Reminder: ~6 hours left",
+        htmlContent,
+      };
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "Unknown error");
+        console.error(`Brevo failed for ${ap.id}: ${errText}`);
+        failed.push(ap.id);
+        continue;
+      }
+
+      // تحديث العلامة
+      const { error: updateErr } = await supabase
+        .from("appointments")
+        .update({ reminder_sent_6h: true })
+        .eq("id", ap.id);
+
+      if (updateErr) {
+        console.error(`Update failed for ${ap.id}:`, updateErr);
+        failed.push(ap.id);
+      } else {
+        sent.push(ap.id);
+      }
+
+    } catch (err) {
+      console.error(`Error processing appointment ${ap?.id || "unknown"}:`, err);
+      failed.push(ap?.id || "unknown");
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      sent_count: sent.length,
+      failed_count: failed.length,
+      sent_ids: sent,
+      failed_ids: failed,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 });
