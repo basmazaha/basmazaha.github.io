@@ -40,30 +40,29 @@ Deno.serve(async (req: Request) => {
   );
 
   // ────────────────────────────────────────────────
+  // إعداد Luxon للتعامل مع التواريخ والتوقيتات بشكل صحيح
+  // ────────────────────────────────────────────────
+  const { DateTime } = await import("https://esm.sh/luxon");
+
+  // ────────────────────────────────────────────────
   // دالة لتنسيق التاريخ بالصيغة العربية (مصر)
   // ────────────────────────────────────────────────
   function formatArabicDate(isoDate: string | null | undefined): string | null {
     if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
 
-    const date = new Date(isoDate);
-    if (isNaN(date.getTime())) return null;
+    const date = DateTime.fromISO(isoDate, { zone: EGYPT_TZ });
+    if (!date.isValid) return null;
 
-    return date.toLocaleDateString("ar-EG", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: EGYPT_TZ,
-    });
+    return date.toLocaleString({ year: 'numeric', month: 'long', day: 'numeric' }, { locale: 'ar-EG' });
   }
 
   // ────────────────────────────────────────────────
   // حساب النافذة الزمنية الحالية (محلي – مصر)
   // ────────────────────────────────────────────────
-  const nowLocal = new Date().toLocaleString("en-US", { timeZone: EGYPT_TZ });
-  const now = new Date(nowLocal);
+  const now = DateTime.now().setZone(EGYPT_TZ);
 
-  const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
-  const windowEnd     = new Date(now.getTime() + 6 * 60 * 60 * 1000 + 15 * 60 * 1000); // نافذة أمان
+  const sixHoursLater = now.plus({ hours: 6 });
+  const windowEnd     = now.plus({ hours: 6, minutes: 15 });
 
   // ────────────────────────────────────────────────
   // جلب المواعيد المرشحة (التي لم يُرسل لها تذكير بعد)
@@ -81,8 +80,8 @@ Deno.serve(async (req: Request) => {
       reminder_sent_6h
     `)
     .eq("reminder_sent_6h", false)
-    .gte("appointment_date", now.toISOString().split("T")[0])
-    .lte("appointment_date", sixHoursLater.toISOString().split("T")[0])
+    .gte("appointment_date", now.toISODate())
+    .lte("appointment_date", sixHoursLater.toISODate())
     .order("appointment_date", { ascending: true });
 
   if (error) {
@@ -111,8 +110,10 @@ Deno.serve(async (req: Request) => {
       const timeStr = ap.appointment_time?.trim() || "00:00:00";
       const dateTimeStr = `${ap.appointment_date}T${timeStr.padEnd(8, ":00")}`;
 
-      const appointmentDate = new Date(dateTimeStr);
-      const appointmentLocal = new Date(appointmentDate.toLocaleString("en-US", { timeZone: EGYPT_TZ }));
+      const appointmentLocal = DateTime.fromISO(dateTimeStr, { zone: EGYPT_TZ });
+      if (!appointmentLocal.isValid) {
+        throw new Error("Invalid appointment date/time");
+      }
 
       // تجاهل إذا كان خارج النافذة
       if (appointmentLocal < now || appointmentLocal > windowEnd) {
@@ -127,21 +128,10 @@ Deno.serve(async (req: Request) => {
 
       if (ap.appointment_time && ap.appointment_time.trim() !== "") {
         const cleanTime = ap.appointment_time.slice(0, 5); // HH:MM
-        const dummyDate = new Date(`1970-01-01T${cleanTime}:00`);
+        const dummyDate = DateTime.fromISO(`1970-01-01T${cleanTime}:00`, { zone: EGYPT_TZ });
 
-        formattedTimeAr = dummyDate.toLocaleTimeString("ar-EG", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: EGYPT_TZ
-        });
-
-        formattedTimeEn = dummyDate.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: EGYPT_TZ
-        });
+        formattedTimeAr = dummyDate.toFormat('hh:mm a', { locale: 'ar-EG' });
+        formattedTimeEn = dummyDate.toFormat('hh:mm a', { locale: 'en-US' });
       }
 
       // ────────────────────────────────────────────────
