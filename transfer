@@ -2,7 +2,6 @@
 // - Running on Supabase Edge Functions (Deno runtime).
 // - BREVO_API_KEY must be set in function secrets.
 // - APP_BASE_URL optional; default used for development.
-// - Brevo expects header "api-key" and POST to /v3/smtp/email.
 
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const APP_BASE_URL = (Deno.env.get("APP_BASE_URL") || "https://new-91v.pages.dev/").replace(/\/+$/, "");
@@ -57,7 +56,6 @@ if (!BREVO_API_KEY) {
     let formattedTimeEn = "Not specified";
 
     if (appointment_time) {
-      // إزالة الثواني إن وجدت → HH:MM
       const timeWithoutSeconds = appointment_time.slice(0, 5);
       const dateObj = new Date(`1970-01-01T${timeWithoutSeconds}:00`);
 
@@ -74,155 +72,65 @@ if (!BREVO_API_KEY) {
       });
     }
 
-    // ────────────────────────────────────────────────
-    // تنسيق التاريخ بالعربية (مصر)
-    // ────────────────────────────────────────────────
-    let formattedDateAr = "غير محدد";
-
-    if (appointment_date && /^\d{4}-\d{2}-\d{2}$/.test(appointment_date)) {
-      const date = new Date(appointment_date);
-      if (!isNaN(date.getTime())) {
-        formattedDateAr = date.toLocaleDateString("ar-EG", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
-      }
-    }
-
-    // رابط الإدارة – النسخة العربية تذهب إلى /manage والإنجليزية إلى /en/manage
+    // رابط الإدارة
     const manageLinkAr = `${APP_BASE_URL}/manage/${manage_token}`;
     const manageLinkEn = `${APP_BASE_URL}/en/manage/${manage_token}`;
 
     const htmlContent = `
-      <div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px;">
+      <div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px;">
         <!-- Arabic Section -->
-        <h2 style="color: #1a3c5e; margin-bottom: 24px; text-align: center;">
+        <h2 style="color: #1e40af; margin: 0 0 28px; text-align: center; font-size: 1.8rem;">
           تأكيد حجز موعدك
         </h2>
 
-        <p style="font-size: 16px; color: #333333; line-height: 1.6;">
+        <p style="font-size: 17px; color: #111827; line-height: 1.7; margin: 0 0 24px;">
           مرحباً ${full_name || "السيد/السيدة"}،
         </p>
 
-        <p style="font-size: 16px; color: #333333; line-height: 1.6;">
-          تم تسجيل موعدك بنجاح في العيادة:
+        <p style="font-size: 16px; color: #374151; line-height: 1.7; margin: 0 0 32px;">
+          لقد تلقينا تفاصيل الحجز الخاص بك بنجاح.<br>
+          يمكنك الاطلاع على تفاصيل موعدك وإدارة حجزك (إلغاء أو إعادة جدولة) من خلال الرابط التالي:
         </p>
 
-        <table style="width: 100%; margin: 20px 0; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold; width: 140px;">
-              الاسم
-            </td>
-            <td style="padding: 12px; border: 1px solid #e0e0e0;">
-              ${full_name || "غير محدد"}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-              التاريخ
-            </td>
-            <td style="padding: 12px; border: 1px solid #e0e0e0;">
-              ${formattedDateAr}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-              الوقت
-            </td>
-            <td style="padding: 12px; border: 1px solid #e0e0e0;">
-              ${formattedTimeAr}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-              السبب
-            </td>
-            <td style="padding: 12px; border: 1px solid #e0e0e0;">
-              ${reason || "غير محدد"}
-            </td>
-          </tr>
-        </table>
-
-        <div style="margin: 32px 0; padding: 20px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; text-align: center;">
-          <p style="font-weight: bold; color: #1e40af; margin: 0 0 16px; font-size: 1.1rem;">
-            إدارة الموعد (إلغاء أو إعادة جدولة)
-          </p>
+        <div style="text-align: center; margin: 40px 0;">
           <a href="${manageLinkAr}"
-             style="display: inline-block; padding: 14px 32px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1.1rem;">
-            إدارة حجزي الآن
+             style="display: inline-block; padding: 16px 48px; background: #3b82f6; color: white; text-decoration: none; border-radius: 10px; font-size: 1.15rem; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+            إدارة أو إعادة جدولة الموعد
           </a>
         </div>
 
-        <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 40px; line-height: 1.5;">
-          إذا لم تقم أنت بحجز هذا الموعد، يرجى تجاهل هذه الرسالة أو الاتصال بنا فوراً.<br>
-          شكراً لثقتك بنا.
+        <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 48px; line-height: 1.6;">
+          إذا لم تقم أنت بحجز هذا الموعد، يرجى تجاهل هذه الرسالة.<br>
+          شكراً لثقتك بعيادة د. عمرو.
         </p>
 
-        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 40px 0;">
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 40px 0;">
 
         <!-- English Section -->
         <div dir="ltr">
-          <h2 style="color: #1a3c5e; margin-bottom: 24px; text-align: center;">
+          <h2 style="color: #1e40af; margin: 0 0 28px; text-align: center; font-size: 1.8rem;">
             Appointment Confirmation
           </h2>
 
-          <p style="font-size: 16px; color: #333333; line-height: 1.6;">
+          <p style="font-size: 17px; color: #111827; line-height: 1.7; margin: 0 0 24px;">
             Hello ${full_name || "Dear Patient"},
           </p>
 
-          <p style="font-size: 16px; color: #333333; line-height: 1.6;">
-            Your appointment has been successfully booked at the clinic:
+          <p style="font-size: 16px; color: #374151; line-height: 1.7; margin: 0 0 32px;">
+            We have successfully received your appointment details.<br>
+            You can view your appointment information and manage your booking (cancel or reschedule) using the link below:
           </p>
 
-          <table style="width: 100%; margin: 20px 0; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold; width: 140px;">
-                Name
-              </td>
-              <td style="padding: 12px; border: 1px solid #e0e0e0;">
-                ${full_name || "Not specified"}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-                Date
-              </td>
-              <td style="padding: 12px; border: 1px solid #e0e0e0;">
-                ${appointment_date || "Not specified"}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-                Time
-              </td>
-              <td style="padding: 12px; border: 1px solid #e0e0e0;">
-                ${formattedTimeEn}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 12px; background: #f8f9fa; border: 1px solid #e0e0e0; font-weight: bold;">
-                Reason
-              </td>
-              <td style="padding: 12px; border: 1px solid #e0e0e0;">
-                ${reason || "Not specified"}
-              </td>
-            </tr>
-          </table>
-
-          <div style="margin: 32px 0; padding: 20px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; text-align: center;">
-            <p style="font-weight: bold; color: #1e40af; margin: 0 0 16px; font-size: 1.1rem;">
-              Cancel or Reschedule
-            </p>
+          <div style="text-align: center; margin: 40px 0;">
             <a href="${manageLinkEn}"
-               style="display: inline-block; padding: 14px 32px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1.1rem;">
-              Manage Booking
+               style="display: inline-block; padding: 16px 48px; background: #3b82f6; color: white; text-decoration: none; border-radius: 10px; font-size: 1.15rem; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+              Manage or Reschedule Appointment
             </a>
           </div>
 
-          <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 40px; line-height: 1.5;">
-            If you did not book this appointment, please ignore this message or contact us immediately.<br>
-            Thank you for your trust.
+          <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 48px; line-height: 1.6;">
+            If you did not book this appointment, please ignore this message.<br>
+            Thank you for choosing Dr. Amr Clinic.
           </p>
         </div>
       </div>
@@ -234,7 +142,7 @@ if (!BREVO_API_KEY) {
         email: "info@dramrclinic.online",
       },
       to: [{ email, name: full_name || "العميل" }],
-      subject: `Booking Confirmation - تأكيد حجز موعد`,
+      subject: `تأكيد الحجز - Booking Confirmation`,
       htmlContent,
     };
 
@@ -252,15 +160,15 @@ if (!BREVO_API_KEY) {
       const result = await resp.json().catch(() => null);
 
       if (!resp.ok) {
-        console.error("Brevo API error:", result || { status: resp.status, statusText: resp.statusText });
+        console.error("Brevo API error:", result || { status: resp.status });
         return new Response(
-          JSON.stringify({ error: result?.message || result || `Brevo API error ${resp.status}` }),
+          JSON.stringify({ error: result?.message || `Brevo error ${resp.status}` }),
           { status: 500, headers: { "content-type": "application/json" } }
         );
       }
 
       return new Response(
-        JSON.stringify({ success: true, data: result }),
+        JSON.stringify({ success: true }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     } catch (err) {
