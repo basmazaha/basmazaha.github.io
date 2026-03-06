@@ -2,7 +2,7 @@
 
   const EDGE_FUNCTION_URL = `${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/check-booked-times`;
 
-  const form = document.getElementById('bookingForm');
+  const form = document.getElementById('rescheduleForm');
   const messageDiv = document.getElementById('message');
   const successMsg = messageDiv.dataset.successMsg;
   const errorMsgBase = messageDiv.dataset.errorMsg;
@@ -43,38 +43,45 @@
   // ──────────────────────────────────────────────
   //                 إرسال النموذج
   // ──────────────────────────────────────────────
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    messageDiv.classList.remove('booking-form__message--hidden', 'success', 'error');
-    messageDiv.textContent = isArabic ? 'جاري الإرسال...' : 'Submitting...';
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      messageDiv.classList.remove('booking-form__message--hidden', 'success', 'error');
+      messageDiv.textContent = isArabic ? 'جاري الإرسال...' : 'Submitting...';
 
-    const formData = new FormData(form);
+      const formData = new FormData(form);
 
-    try {
-      const lang = document.documentElement.lang || 'ar';
-      const response = await fetch(`/api/submit-booking?lang=${lang}`, { method: 'POST', body: formData });
-      const result = await response.json();
+      try {
+        const lang = document.documentElement.lang || 'ar';
+        const response = await fetch(`/api/reschedule?lang=${lang}`, {
+          method: 'POST',
+          body: formData
+        });
 
-      if (response.ok) {
-        messageDiv.classList.add('success');
-        messageDiv.textContent = result.message || successMsg;
-        form.reset();
+        const result = await response.json();
 
-        document.getElementById('date-trigger').textContent = dateTriggerDefault;
-        document.getElementById('time-trigger').textContent = timeTriggerDefault;
-        document.getElementById('appointment_date').value = '';
-        document.getElementById('appointment_time').value = '';
+        if (response.ok) {
+          messageDiv.classList.add('success');
+          messageDiv.textContent = result.message || successMsg;
 
-        document.getElementById('date-dropdown')?.classList.add('hidden');
-        document.getElementById('time-dropdown')?.classList.add('hidden');
-      } else {
-        throw new Error(result.error || errorMsgBase);
+          form.querySelector('button[type="submit"]').disabled = true;
+
+          document.getElementById('date-trigger').textContent = dateTriggerDefault;
+          document.getElementById('time-trigger').textContent = timeTriggerDefault;
+          document.getElementById('appointment_date').value = '';
+          document.getElementById('appointment_time').value = '';
+
+          document.getElementById('date-dropdown')?.classList.add('hidden');
+          document.getElementById('time-dropdown')?.classList.add('hidden');
+        } else {
+          throw new Error(result.error || errorMsgBase);
+        }
+      } catch (err) {
+        messageDiv.classList.add('error');
+        messageDiv.textContent = err.message || errorMsgBase;
       }
-    } catch (err) {
-      messageDiv.classList.add('error');
-      messageDiv.textContent = err.message || errorMsgBase;
-    }
-  });
+    });
+  }
 
   // ──────────────────────────────────────────────
   //     جلب المواعيد المحجوزة لتاريخ معين
@@ -109,6 +116,7 @@
   const dateHidden = document.getElementById('appointment_date');
 
   async function generateDates() {
+    if (!dateScroll) return;
     dateScroll.innerHTML = '<div class="scroll-item disabled">جاري التحميل...</div>';
 
     try {
@@ -120,7 +128,7 @@
         },
         body: JSON.stringify({ 
           query_type: "available_dates_next_days",
-          days: 15  // غيرت إلى 15 يوم كما طلبت
+          days: 15 
         }),
       });
 
@@ -162,34 +170,38 @@
     }
   }
 
-  dateScroll.addEventListener('click', (e) => {
-    const item = e.target.closest('.scroll-item');
-    if (!item || item.classList.contains('disabled')) return;
-    dateScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
-    item.classList.add('selected');
-  });
+  if (dateScroll) {
+    dateScroll.addEventListener('click', (e) => {
+      const item = e.target.closest('.scroll-item');
+      if (!item || item.classList.contains('disabled')) return;
+      dateScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+    });
+  }
 
-  dateTrigger.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const isOpen = !dateDropdown.classList.contains('hidden');
+  if (dateTrigger) {
+    dateTrigger.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const isOpen = !dateDropdown.classList.contains('hidden');
 
-    document.getElementById('time-dropdown')?.classList.add('hidden');
+      document.getElementById('time-dropdown')?.classList.add('hidden');
 
-    if (isOpen) {
-      dateDropdown.classList.add('hidden');
-    } else {
-      await generateDates();
-      dateDropdown.classList.remove('hidden');
+      if (isOpen) {
+        dateDropdown.classList.add('hidden');
+      } else {
+        await generateDates();
+        dateDropdown.classList.remove('hidden');
 
-      if (dateHidden.value) {
-        const sel = dateScroll.querySelector(`[data-value="${dateHidden.value}"]`);
-        if (sel) {
-          sel.classList.add('selected');
-          sel.scrollIntoView({ block: 'center', behavior: 'instant' });
+        if (dateHidden.value) {
+          const sel = dateScroll.querySelector(`[data-value="${dateHidden.value}"]`);
+          if (sel) {
+            sel.classList.add('selected');
+            sel.scrollIntoView({ block: 'center', behavior: 'instant' });
+          }
         }
       }
-    }
-  });
+    });
+  }
 
   // ──────────────────────────────────────────────
   //               الأوقات dropdown – ديناميكي من working_hours
@@ -200,6 +212,7 @@
   const timeHidden = document.getElementById('appointment_time');
 
   async function generateTimes() {
+    if (!timeScroll) return;
     timeScroll.innerHTML = '<div class="scroll-item disabled">جاري التحميل...</div>';
 
     const selectedDate = dateHidden.value;
@@ -299,58 +312,66 @@
     }
   }
 
-  timeScroll.addEventListener('click', (e) => {
-    const item = e.target.closest('.scroll-item');
-    if (!item) return;
-    timeScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
-    item.classList.add('selected');
-  });
+  if (timeScroll) {
+    timeScroll.addEventListener('click', (e) => {
+      const item = e.target.closest('.scroll-item');
+      if (!item) return;
+      timeScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+    });
+  }
 
-  timeTrigger.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const isOpen = !timeDropdown.classList.contains('hidden');
+  if (timeTrigger) {
+    timeTrigger.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const isOpen = !timeDropdown.classList.contains('hidden');
 
-    document.getElementById('date-dropdown')?.classList.add('hidden');
+      document.getElementById('date-dropdown')?.classList.add('hidden');
 
-    if (isOpen) {
-      timeDropdown.classList.add('hidden');
-    } else {
-      await generateTimes();
-      timeDropdown.classList.remove('hidden');
+      if (isOpen) {
+        timeDropdown.classList.add('hidden');
+      } else {
+        await generateTimes();
+        timeDropdown.classList.remove('hidden');
 
-      if (timeHidden.value) {
-        const sel = timeScroll.querySelector(`[data-value="${timeHidden.value}"]`);
-        if (sel) {
-          sel.classList.add('selected');
-          sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (timeHidden.value) {
+          const sel = timeScroll.querySelector(`[data-value="${timeHidden.value}"]`);
+          if (sel) {
+            sel.classList.add('selected');
+            sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
         }
       }
-    }
-  });
-
-  // اختيار العنصر وإغلاق الـ dropdown
-  [dateScroll, timeScroll].forEach(scroll => {
-    scroll.addEventListener('click', (e) => {
-      const item = e.target.closest('.scroll-item');
-      if (!item || item.classList.contains('disabled')) return;
-
-      const trigger = scroll.id === 'date-scroll' ? dateTrigger : timeTrigger;
-      const hidden = scroll.id === 'date-scroll' ? dateHidden : timeHidden;
-      const dropdown = scroll.id === 'date-scroll' ? dateDropdown : timeDropdown;
-
-      trigger.textContent = item.textContent;
-      hidden.value = item.dataset.value;
-      dropdown.classList.add('hidden');
     });
+  }
+
+  // إغلاق القوائم المنسدلة عند النقر خارجها
+  document.addEventListener('click', (e) => {
+    if (!dateTrigger?.contains(e.target) && !dateDropdown?.contains(e.target)) {
+      dateDropdown?.classList.add('hidden');
+    }
+    if (!timeTrigger?.contains(e.target) && !timeDropdown?.contains(e.target)) {
+      timeDropdown?.classList.add('hidden');
+    }
   });
 
-  // إغلاق الـ dropdowns عند الضغط خارجها
-  document.addEventListener('click', (e) => {
-    if (!dateTrigger.contains(e.target) && !dateDropdown.contains(e.target)) {
-      dateDropdown.classList.add('hidden');
-    }
-    if (!timeTrigger.contains(e.target) && !timeDropdown.contains(e.target)) {
-      timeDropdown.classList.add('hidden');
+  // اختيار العنصر وإغلاق القائمة
+  [dateScroll, timeScroll].forEach(scroll => {
+    if (scroll) {
+      scroll.addEventListener('click', (e) => {
+        const item = e.target.closest('.scroll-item');
+        if (!item || item.classList.contains('disabled')) return;
+
+        const trigger  = scroll.id === 'date-scroll' ? dateTrigger : timeTrigger;
+        const hidden   = scroll.id === 'date-scroll' ? dateHidden : timeHidden;
+        const dropdown = scroll.id === 'date-scroll' ? dateDropdown : timeDropdown;
+
+        if (trigger && hidden && dropdown) {
+          trigger.textContent = item.textContent;
+          hidden.value = item.dataset.value;
+          dropdown.classList.add('hidden');
+        }
+      });
     }
   });
 
