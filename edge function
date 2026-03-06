@@ -1,0 +1,236 @@
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false },
+  global: { headers: { "x-client-info": "check-booked-times" } },
+});
+
+Deno.serve(async (req: Request) => {
+  try {
+    if (req.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    if (req.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+    }
+
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { date, query_type = "booked_times", days = 15 } = body ?? {};  // غيرت الافتراضي إلى 15 يوم
+
+    // ─── التحقق الأساسي من التاريخ (عند الحاجة) ───
+    if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      return new Response(
+        JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ─── 1. جلب الأيام المعطلة (off_days) ───
+    if (query_type === "off_days") {
+      const { data, error } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", new Date().toISOString().split("T")[0])
+        .order("date", { ascending: true });
+
+      if (error) {
+        console.error("Off days query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في جلب الأيام المعطلة" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const off_days = (data || []).map(row => row.date);
+      return new Response(JSON.stringify({ off_days }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 2. جلب ساعات العمل لتاريخ معين (جديد – من working_hours) ───
+    if (query_type === "working_hours_for_date") {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const d = new Date(date);
+      const dow = d.getDay();
+
+      const { data, error } = await supabase
+        .from("working_hours")
+        .select("is_open, start_time, end_time, slot_duration_minutes")
+        .eq("day_of_week", dow)
+        .eq("is_open", true)
+        .single();
+
+      if (error || !data) {
+        console.error("Working hours query error:", error);
+        return new Response(JSON.stringify({ error: "لا توجد ساعات عمل لهذا اليوم" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 3. جلب المواعيد المتاحة خلال الـ N يوم القادمة ───
+    if (query_type === "available_dates_next_days") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const futureDate = new Date(today);
+      futureDate.setDate(today.getDate() + days);
+
+      // جلب off_days في الفترة
+      const { data: offData } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", today.toISOString().split("T")[0])
+        .lte("date", futureDate.toISOString().split("T")[0]);
+
+      const offDaysSet = new Set(offData?.map(r => r.date) || []);
+
+      // جلب إعدادات ساعات العمل
+      const { data: hoursData } = await supabase
+        .from("working_hours")
+        .select("day_of_week, is_open, start_time, end_time, slot_duration_minutes");
+
+      const hoursMap = new Map<number, any>();
+      hoursData?.forEach(h => hoursMap.set(h.day_of_week, h));
+
+      // جلب الحجوزات في الفترة (لمعرفة الأيام الممتلئة)
+      const { data: bookings } = await supabase
+        .from("appointments")
+        .select("appointment_date, appointment_time")
+        .gte("appointment_date", today.toISOString().split("T")[0])
+        .lte("appointment_date", futureDate.toISOString().split("T")[0]);
+
+      const bookedByDate = new Map<string, Set<string>>();
+      bookings?.forEach(b => {
+        const d = b.appointment_date;
+        if (!bookedByDate.has(d)) bookedByDate.set(d, new Set());
+        bookedByDate.get(d)!.add(b.appointment_time.substring(0, 5));
+      });
+
+      const availableDates: string[] = [];
+
+      for (let i = 0; i < days; i++) {
+        const current = new Date(today);
+        current.setDate(today.getDate() + i);
+        const dateStr = current.toISOString().split("T")[0];
+
+        if (offDaysSet.has(dateStr)) continue;
+
+        const dow = current.getDay();
+        const config = hoursMap.get(dow);
+
+        if (!config || !config.is_open || !config.start_time || !config.end_time) {
+          continue;
+        }
+
+        const [sh, sm] = config.start_time.split(":").map(Number);
+        const [eh, em] = config.end_time.split(":").map(Number);
+        const totalMin = (eh * 60 + em) - (sh * 60 + sm);
+        const slotMin = config.slot_duration_minutes || 15;
+        const maxSlots = Math.floor(totalMin / slotMin);
+
+        if (maxSlots <= 0) continue;
+
+        const bookedSet = bookedByDate.get(dateStr) || new Set();
+        const bookedCount = bookedSet.size;
+
+        // اليوم الحالي → تحقق إضافي
+        let isTodayAndPassed = false;
+        if (i === 0) {
+          const now = new Date();
+          const dayEnd = new Date(current);
+          dayEnd.setHours(eh, em, 0, 0);
+          if (now > dayEnd) {
+            isTodayAndPassed = true;
+          }
+        }
+
+        if (!isTodayAndPassed && bookedCount < maxSlots) {
+          availableDates.push(dateStr);
+        }
+      }
+
+      return new Response(JSON.stringify({ available_dates: availableDates }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 4. جلب المواعيد المحجوزة ليوم معين (الافتراضي) ───
+    if (query_type === "booked_times" || !query_type) {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("appointment_time")
+        .eq("appointment_date", date);
+
+      if (error) {
+        console.error("Booked times query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في قاعدة البيانات" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const booked = (Array.isArray(data) ? data : [])
+        .map(row => row?.appointment_time?.substring(0, 5))
+        .filter(Boolean);
+
+      return new Response(JSON.stringify({ booked }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // استعلام غير مدعوم
+    return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    console.error("Edge Function error:", err?.stack ?? err);
+    return new Response(
+      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
