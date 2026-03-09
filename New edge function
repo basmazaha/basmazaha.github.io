@@ -103,7 +103,9 @@ export async function POST({ request }) {
 
   if (query_type === "available_times_for_date") {
     const selectedDate = date;
-    if (!selectedDate) return new Response(JSON.stringify({ available_times: [] }), { status: 200 });
+    if (!selectedDate) {
+      return new Response(JSON.stringify({ available_times: [] }), { status: 200 });
+    }
 
     const config = await getWorkingHoursForDate(selectedDate, timezone);
     if (!config) {
@@ -127,7 +129,7 @@ export async function POST({ request }) {
     if (isToday) {
       const timeF = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false });
       const [currH, currM] = timeF.format(now).split(':').map(Number);
-      let minutes = currH * 60 + currM + 60;
+      let minutes = currH * 60 + currM + 60; // بعد ساعة واحدة كحد أدنى
       const remainder = minutes % slotDuration;
       if (remainder !== 0) minutes += slotDuration - remainder;
       minStartMinutes = Math.max(minutes, startMinutes);
