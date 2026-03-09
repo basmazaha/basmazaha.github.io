@@ -1,0 +1,156 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+);
+
+async function getBusinessTimezone() {
+  const { data } = await supabase.from('business_settings').select('timezone').maybeSingle();
+  return data?.timezone || 'Africa/Cairo';
+}
+
+function getDayOfWeekInTimezone(dateStr: string, timezone: string): number {
+  const dateForDay = new Date(`${dateStr}T12:00:00`);
+  const dayNameShort = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short'
+  }).format(dateForDay);
+
+  const dayMap: Record<string, number> = {
+    'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
+  };
+  return dayMap[dayNameShort] ?? 0;
+}
+
+async function getWorkingHoursForDate(dateStr: string, timezone: string) {
+  const dayOfWeek = getDayOfWeekInTimezone(dateStr, timezone);
+
+  const { data } = await supabase
+    .from('working_hours')
+    .select('start_time, end_time, slot_duration_minutes, break_start, break_end, is_closed')
+    .eq('day_of_week', dayOfWeek)
+    .maybeSingle();
+
+  if (!data || data.is_closed) return null;
+  return data;
+}
+
+async function getBookedTimesForDate(dateStr: string, timezone: string) {
+  const { data } = await supabase
+    .from('appointments')
+    .select('date_time')
+    .gte('date_time', `${dateStr}T00:00:00`)
+    .lt('date_time', `${dateStr}T23:59:59`);
+
+  const booked = new Set<string>();
+  if (!data) return booked;
+
+  const timeFormatter = new Intl.DateTimeFormat('en', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+
+  for (const row of data) {
+    if (row.date_time) {
+      const localTime = timeFormatter.format(new Date(row.date_time));
+      booked.add(localTime);
+    }
+  }
+  return booked;
+}
+
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+export async function POST({ request }) {
+  const body = await request.json();
+  const { query_type, date, days = 15 } = body;
+
+  const timezone = await getBusinessTimezone();
+
+  if (query_type === "off_days") {
+    const { data } = await supabase.from('off_days').select('date');
+    return new Response(JSON.stringify({ off_days: data?.map(d => d.date) || [] }), { status: 200 });
+  }
+
+  if (query_type === "available_dates_next_days") {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const currentLocalStr = formatter.format(now);
+    const currentLocal = new Date(currentLocalStr);
+
+    const available: string[] = [];
+    const offDaysSet = new Set((await supabase.from('off_days').select('date')).data?.map(d => d.date) || []);
+
+    for (let i = 0; i < days; i++) {
+      const d = new Date(currentLocal);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+
+      if (offDaysSet.has(dateStr)) continue;
+
+      const wh = await getWorkingHoursForDate(dateStr, timezone);
+      if (wh) available.push(dateStr);
+    }
+
+    return new Response(JSON.stringify({ available_dates: available }), { status: 200 });
+  }
+
+  if (query_type === "available_times_for_date") {
+    const selectedDate = date;
+    if (!selectedDate) return new Response(JSON.stringify({ available_times: [] }), { status: 200 });
+
+    const config = await getWorkingHoursForDate(selectedDate, timezone);
+    if (!config) {
+      return new Response(JSON.stringify({ available_times: [] }), { status: 200 });
+    }
+
+    const booked = await getBookedTimesForDate(selectedDate, timezone);
+
+    const startMinutes = timeToMinutes(config.start_time);
+    const endMinutes   = timeToMinutes(config.end_time);
+    const slotDuration = config.slot_duration_minutes || 15;
+
+    const breakStartMin = config.break_start ? timeToMinutes(config.break_start) : null;
+    const breakEndMin   = config.break_end   ? timeToMinutes(config.break_end)   : null;
+
+    const now = new Date();
+    const dateF = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const isToday = dateF.format(now) === selectedDate;
+
+    let minStartMinutes = startMinutes;
+    if (isToday) {
+      const timeF = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false });
+      const [currH, currM] = timeF.format(now).split(':').map(Number);
+      let minutes = currH * 60 + currM + 60;
+      const remainder = minutes % slotDuration;
+      if (remainder !== 0) minutes += slotDuration - remainder;
+      minStartMinutes = Math.max(minutes, startMinutes);
+    }
+
+    const availableTimes: string[] = [];
+
+    for (let m = minStartMinutes; m < endMinutes; m += slotDuration) {
+      const hour   = Math.floor(m / 60);
+      const minute = m % 60;
+      const time24 = `\( {hour.toString().padStart(2, '0')}: \){minute.toString().padStart(2, '0')}`;
+
+      if (booked.has(time24)) continue;
+
+      if (breakStartMin !== null && breakEndMin !== null) {
+        if (m >= breakStartMin && m < breakEndMin) continue;
+      }
+
+      availableTimes.push(time24);
+    }
+
+    return new Response(JSON.stringify({ available_times: availableTimes }), { status: 200 });
+  }
+
+  return new Response(JSON.stringify({ error: 'Invalid query_type' }), { status: 400 });
+}
