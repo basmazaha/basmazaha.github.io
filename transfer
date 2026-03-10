@@ -1,5 +1,5 @@
 // supabase/functions/create-appointment/index.ts
-// (يفضل تسميتها create-appointment أو submit-booking بدلاً من check-booked-times)
+
 
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
