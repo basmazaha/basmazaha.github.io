@@ -1,3 +1,222 @@
+// supabase/functions/create-appointment/index.ts
+// (يفضل تسميتها create-appointment أو submit-booking بدلاً من check-booked-times)
+
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false },
+  global: { headers: { "x-client-info": "create-appointment" } },
+});
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+  }
+
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const {
+    full_name = "",
+    email = "",
+    phone = "",
+    reason = "",
+    datetime, // يُتوقع: "2026-03-15T14:30:00"  ← توقيت محلي
+  } = body;
+
+  // ──────────────────────────────────────────────
+  // التحقق من الحقول المطلوبة
+  // ──────────────────────────────────────────────
+  if (!full_name.trim() || !email.trim() || !phone.trim() || !datetime) {
+    return new Response(
+      JSON.stringify({ error: "الحقول المطلوبة ناقصة (الاسم، البريد، الهاتف، التاريخ والوقت)" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // صيغة datetime متوقعة ISO محلية بدون Z
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
+    return new Response(
+      JSON.stringify({ error: "صيغة التاريخ والوقت غير صحيحة" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    const tz = await getBusinessTimezone(); // e.g. "Africa/Cairo"
+
+    // تحويل التوقيت المحلي → UTC ISO string
+    const utcDateTime = localToUTC(datetime, tz);
+
+    // ──────────────────────────────────────────────
+    // التحقق من أن الموعد ليس في الماضي
+    // ──────────────────────────────────────────────
+    if (new Date(utcDateTime) < new Date()) {
+      return new Response(
+        JSON.stringify({ error: "لا يمكن حجز موعد في الماضي" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ──────────────────────────────────────────────
+    // التحقق من عدم وجود تعارض (نفس اللحظة بالضبط)
+    // ──────────────────────────────────────────────
+    const { data: conflict, error: conflictErr } = await supabase
+      .from("appointments")
+      .select("id")
+      .eq("date_time", utcDateTime)
+      .maybeSingle();
+
+    if (conflictErr) throw conflictErr;
+    if (conflict) {
+      return new Response(
+        JSON.stringify({ error: "هذا الموعد محجوز بالفعل" }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ──────────────────────────────────────────────
+    // الإدراج النهائي
+    // ──────────────────────────────────────────────
+    const { error: insertError } = await supabase.from("appointments").insert({
+      full_name: full_name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      reason: reason.trim(),
+      date_time: utcDateTime,          // UTC ISO → 2026-03-15T12:30:00.000Z مثلاً
+      status: "confirmed",
+    });
+
+    if (insertError) {
+      if (insertError.code === "23505") { // unique violation
+        return new Response(
+          JSON.stringify({ error: "هذا الموعد تم حجزه للتو" }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      console.error("Insert error:", insertError);
+      throw insertError;
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "تم حفظ الحجز بنجاح",
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (err) {
+    console.error("خطأ داخلي:", err);
+    return new Response(
+      JSON.stringify({ error: "حدث خطأ أثناء معالجة الحجز" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
+
+// ──────────────────────────────────────────────
+// دوال مساعدة
+// ──────────────────────────────────────────────
+
+async function getBusinessTimezone(): Promise<string> {
+  const { data, error } = await supabase
+    .from("business_settings")
+    .select("timezone")
+    .maybeSingle();
+
+  if (error) console.error("خطأ جلب الـ timezone:", error);
+  return data?.timezone || "Africa/Cairo";
+}
+
+/**
+ * تحويل تاريخ/وقت محلي (ISO string بدون Z) إلى UTC ISO string
+ * باستخدام IANA timezone
+ */
+function localToUTC(localIso: string, ianaTz: string): string {
+  // localIso مثال: "2026-03-15T14:30:00"
+  const localDate = new Date(localIso);
+
+  // نحصل على offset التوقيت المحلي باستخدام Intl
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: ianaTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(localDate);
+  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+
+  const y = Number(map.year);
+  const m = Number(map.month) - 1;
+  const d = Number(map.day);
+  const hh = Number(map.hour);
+  const mm = Number(map.minute);
+  const ss = Number(map.second || "00");
+
+  // إنشاء كائن Date بالتوقيت المحلي
+  const localWallTime = new Date(y, m, d, hh, mm, ss);
+
+  // فرق الـ offset بالمللي ثانية
+  const offsetMs = localWallTime.getTime() - localDate.getTime();
+
+  // طرح الـ offset للحصول على UTC
+  const utcTimeMs = localDate.getTime() - offsetMs;
+
+  return new Date(utcTimeMs).toISOString();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // supabase/functions/check-booked-times/index.ts
 
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
