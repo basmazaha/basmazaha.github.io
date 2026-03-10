@@ -1,3 +1,5 @@
+// supabase/functions/check-booked-times/index.ts
+
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
 const corsHeaders = {
@@ -15,204 +17,39 @@ const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "
 });
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+  }
+
+  let body;
   try {
-    if (req.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
-    if (req.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-    }
+  const { query_type } = body;
 
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return new Response(JSON.stringify({ error: "Bad JSON body" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { date, query_type = "booked_times", days = 15 } = body ?? {};
-
-    if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
-      return new Response(
-        JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // 1. جلب الأيام المعطلة
-    if (query_type === "off_days") {
-      const { data, error } = await supabase
-        .from("off_days")
-        .select("date")
-        .gte("date", new Date().toISOString().split("T")[0])
-        .order("date", { ascending: true });
-
-      if (error) {
-        console.error("Off days query error:", error);
-        return new Response(JSON.stringify({ error: "خطأ في جلب الأيام المعطلة" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const off_days = (data || []).map(row => row.date);
-      return new Response(JSON.stringify({ off_days }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 2. ساعات العمل ليوم معين
-    if (query_type === "working_hours_for_date") {
-      if (!date) {
-        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const d = new Date(date);
-      const dow = d.getDay();
-
-      const { data, error } = await supabase
-        .from("working_hours")
-        .select("is_open, start_time, end_time, slot_duration_minutes")
-        .eq("day_of_week", dow)
-        .eq("is_open", true)
-        .single();
-
-      if (error || !data) {
-        console.error("Working hours query error:", error);
-        return new Response(JSON.stringify({ error: "لا توجد ساعات عمل لهذا اليوم" }), {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response(JSON.stringify(data), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 3. المواعيد المتاحة في الـ N يوم القادمة
+  try {
+    // ─── موجود مسبقًا ────────────────────────────────────────
     if (query_type === "available_dates_next_days") {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const futureDate = new Date(today);
-      futureDate.setDate(today.getDate() + days);
-
-      const { data: offData } = await supabase
-        .from("off_days")
-        .select("date")
-        .gte("date", today.toISOString().split("T")[0])
-        .lte("date", futureDate.toISOString().split("T")[0]);
-
-      const offDaysSet = new Set(offData?.map(r => r.date) || []);
-
-      const { data: hoursData } = await supabase
-        .from("working_hours")
-        .select("day_of_week, is_open, start_time, end_time, slot_duration_minutes");
-
-      const hoursMap = new Map<number, any>();
-      hoursData?.forEach(h => hoursMap.set(h.day_of_week, h));
-
-      const { data: bookings } = await supabase
-        .from("appointments")
-        .select("appointment_date, appointment_time")
-        .gte("appointment_date", today.toISOString().split("T")[0])
-        .lte("appointment_date", futureDate.toISOString().split("T")[0]);
-
-      const bookedByDate = new Map<string, Set<string>>();
-      bookings?.forEach(b => {
-        const d = b.appointment_date;
-        if (!bookedByDate.has(d)) bookedByDate.set(d, new Set());
-        bookedByDate.get(d)!.add(b.appointment_time.substring(0, 5));
-      });
-
-      const availableDates: string[] = [];
-
-      for (let i = 0; i < days; i++) {
-        const current = new Date(today);
-        current.setDate(today.getDate() + i);
-        const dateStr = current.toISOString().split("T")[0];
-
-        if (offDaysSet.has(dateStr)) continue;
-
-        const dow = current.getDay();
-        const config = hoursMap.get(dow);
-
-        if (!config || !config.is_open || !config.start_time || !config.end_time) {
-          continue;
-        }
-
-        const [sh, sm] = config.start_time.split(":").map(Number);
-        const [eh, em] = config.end_time.split(":").map(Number);
-        const totalMin = (eh * 60 + em) - (sh * 60 + sm);
-        const slotMin = config.slot_duration_minutes || 15;
-        const maxSlots = Math.floor(totalMin / slotMin);
-
-        if (maxSlots <= 0) continue;
-
-        const bookedSet = bookedByDate.get(dateStr) || new Set();
-        const bookedCount = bookedSet.size;
-
-        let isTodayAndPassed = false;
-        if (i === 0) {
-          const now = new Date();
-          const dayEnd = new Date(current);
-          dayEnd.setHours(eh, em, 0, 0);
-          if (now > dayEnd) {
-            isTodayAndPassed = true;
-          }
-        }
-
-        if (!isTodayAndPassed && bookedCount < maxSlots) {
-          availableDates.push(dateStr);
-        }
-      }
-
-      return new Response(JSON.stringify({ available_dates: availableDates }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return await handleAvailableDates(body);
     }
 
-    // 4. المواعيد المحجوزة ليوم معين (الافتراضي)
-    if (query_type === "booked_times" || !query_type) {
-      if (!date) {
-        return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    if (query_type === "available_times_for_date") {
+      return await handleAvailableTimes(body);
+    }
 
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("appointment_time")
-        .eq("appointment_date", date);
-
-      if (error) {
-        console.error("Booked times query error:", error);
-        return new Response(JSON.stringify({ error: "خطأ في قاعدة البيانات" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const booked = (Array.isArray(data) ? data : [])
-        .map(row => row?.appointment_time?.substring(0, 5))
-        .filter(Boolean);
-
-      return new Response(JSON.stringify({ booked }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // ─── الوظيفة الجديدة: إنشاء موعد ───────────────────────────────
+    if (query_type === "create_appointment") {
+      return await handleCreateAppointment(body);
     }
 
     return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
@@ -221,10 +58,281 @@ Deno.serve(async (req: Request) => {
     });
 
   } catch (err) {
-    console.error("Edge Function error:", err?.stack ?? err);
+    console.error("Edge Function error:", err);
+    return new Response(JSON.stringify({ error: "خطأ داخلي في الخادم" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+//    الدوال المساعدة (الموجودة + الجديدة)
+// ──────────────────────────────────────────────────────────────
+
+async function getBusinessTimezone(): Promise<string> {
+  const { data } = await supabase
+    .from("business_settings")
+    .select("timezone")
+    .maybeSingle();
+  return data?.timezone || "Africa/Cairo";
+}
+
+async function handleAvailableDates({ days = 15 }: any) {
+  const timezone = await getBusinessTimezone();
+  const today = new Date();
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const currentLocalStr = formatter.format(today);
+
+  const { data: offData } = await supabase
+    .from("off_days")
+    .select("date")
+    .gte("date", currentLocalStr);
+
+  const offDaysSet = new Set(offData?.map((r) => r.date) || []);
+
+  const available: string[] = [];
+  const currentLocal = new Date(currentLocalStr);
+
+  for (let i = 0; i < days; i++) {
+    const d = new Date(currentLocal);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+
+    if (offDaysSet.has(dateStr)) continue;
+
+    const dow = await getDayOfWeekInBusinessTimezone(dateStr);
+    const { data: wh } = await supabase
+      .from("working_hours")
+      .select("is_open")
+      .eq("day_of_week", dow)
+      .maybeSingle();
+
+    if (wh?.is_open) available.push(dateStr);
+  }
+
+  return new Response(JSON.stringify({ available_dates: available }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function handleAvailableTimes({ date }: any) {
+  if (!date || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return new Response(JSON.stringify({ available_times: [] }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const dow = await getDayOfWeekInBusinessTimezone(date);
+  const { data: config, error } = await supabase
+    .from("working_hours")
+    .select("is_open, start_time, end_time, slot_duration_minutes, break_start, break_end")
+    .eq("day_of_week", dow)
+    .maybeSingle();
+
+  if (error || !config || !config.is_open) {
+    return new Response(JSON.stringify({ available_times: [] }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const booked = await getBookedTimes(date);
+
+  const startMin = timeToMinutes(config.start_time);
+  const endMin = timeToMinutes(config.end_time);
+  const slot = config.slot_duration_minutes || 15;
+  const breakStart = config.break_start ? timeToMinutes(config.break_start) : null;
+  const breakEnd = config.break_end ? timeToMinutes(config.break_end) : null;
+
+  const isToday = new Date().toISOString().split("T")[0] === date;
+  let minStart = startMin;
+  if (isToday) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes() + 60; // buffer 60 دقيقة
+    minStart = Math.max(nowMin - (nowMin % slot) + slot, startMin);
+  }
+
+  const available: string[] = [];
+  for (let m = minStart; m < endMin; m += slot) {
+    if (breakStart !== null && breakEnd !== null && m >= breakStart && m < breakEnd) continue;
+    if (booked.has(formatMinutes(m))) continue;
+
+    available.push(formatMinutes(m));
+  }
+
+  return new Response(JSON.stringify({ available_times: available }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function handleCreateAppointment(body: any) {
+  const {
+    full_name,
+    email,
+    phone,
+    reason = "",
+    datetime, // "2025-03-15T14:30:00"  ← محلي
+  } = body;
+
+  if (!full_name?.trim() || !email?.trim() || !phone?.trim() || !datetime) {
     return new Response(
-      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      JSON.stringify({ error: "الحقول المطلوبة ناقصة" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // ─── التحقق من صيغة datetime ────────────────────────────────
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
+    return new Response(
+      JSON.stringify({ error: "صيغة التاريخ/الوقت غير صحيحة" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const tz = await getBusinessTimezone();
+
+  // تحويل التوقيت المحلي → UTC
+  const utcDateTime = localToUTC(datetime, tz);
+
+  // التحقق من أن الموعد ليس في الماضي
+  if (new Date(utcDateTime) < new Date()) {
+    return new Response(
+      JSON.stringify({ error: "لا يمكن حجز موعد في الماضي" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // التحقق من عدم وجود حجز بنفس الوقت
+  const { data: conflict } = await supabase
+    .from("appointments")
+    .select("id")
+    .eq("date_time", utcDateTime)
+    .maybeSingle();
+
+  if (conflict) {
+    return new Response(
+      JSON.stringify({ error: "هذا الموعد محجوز بالفعل" }),
+      { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // ─── الحجز ───────────────────────────────────────────────────
+  const { error } = await supabase.from("appointments").insert({
+    full_name: full_name.trim(),
+    email: email.trim(),
+    phone: phone.trim(),
+    reason: reason.trim(),
+    date_time: utcDateTime,
+    status: "confirmed",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return new Response(
+        JSON.stringify({ error: "هذا الموعد تم حجزه للتو" }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    console.error("Insert error:", error);
+    return new Response(
+      JSON.stringify({ error: "فشل في حفظ الحجز" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
-});   // ← القوس الناقص كان هنا — تم إضافته
+
+  return new Response(
+    JSON.stringify({ success: true, message: "تم الحجز بنجاح" }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+// ─── دوال مساعدة إضافية ────────────────────────────────────────
+
+function localToUTC(localIso: string, ianaTz: string): string {
+  const dt = new Date(localIso);
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: ianaTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(dt);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+
+  const localDate = new Date(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second)
+  );
+
+  // فرق التوقيت بالمللي ثانية
+  const offsetMs = localDate.getTime() - dt.getTime();
+  const utcTime = dt.getTime() - offsetMs;
+
+  return new Date(utcTime).toISOString();
+}
+
+async function getDayOfWeekInBusinessTimezone(dateStr: string): Promise<number> {
+  const tz = await getBusinessTimezone();
+  const date = new Date(`${dateStr}T12:00:00`);
+  const dayShort = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+  }).format(date);
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[dayShort] ?? 0;
+}
+
+async function getBookedTimes(date: string): Promise<Set<string>> {
+  const tz = await getBusinessTimezone();
+  const start = `${date}T00:00:00Z`;
+  const end = `${date}T23:59:59Z`;
+
+  const { data } = await supabase
+    .from("appointments")
+    .select("date_time")
+    .gte("date_time", start)
+    .lt("date_time", end);
+
+  const booked = new Set<string>();
+  const fmt = new Intl.DateTimeFormat("en", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  data?.forEach((row) => {
+    if (row.date_time) booked.add(fmt.format(new Date(row.date_time)));
+  });
+
+  return booked;
+}
+
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function formatMinutes(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `\( {h.toString().padStart(2, "0")}: \){m.toString().padStart(2, "0")}`;
+}
