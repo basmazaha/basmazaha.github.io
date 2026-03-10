@@ -1,378 +1,230 @@
-<script>
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
-  const EDGE_FUNCTION_URL = `${import.meta.env.PUBLIC_SUPABASE_URL}/functions/v1/check-booked-times`;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
-  const form = document.getElementById('rescheduleForm');
-  const messageDiv = document.getElementById('message');
-  const successMsg = messageDiv.dataset.successMsg;
-  const errorMsgBase = messageDiv.dataset.errorMsg;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  const locale = document.documentElement.lang || 'ar';
-  const isArabic = locale.startsWith('ar');
+const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false },
+  global: { headers: { "x-client-info": "check-booked-times" } },
+});
 
-  const dateTriggerDefault = isArabic ? 'اختر التاريخ ←' : 'Choose date ←';
-  const timeTriggerDefault = isArabic ? 'اختر الوقت ←' : 'Choose time ←';
-  const selectDateFirstMsg = isArabic ? 'اختر التاريخ أولاً' : 'Select date first';
-  const noTimesAvailableMsg = isArabic ? 'لا توجد مواعيد متاحة' : 'No times available';
-
-  let offDays = new Set();
-
-  async function fetchOffDays() {
-    try {
-      const response = await fetch(EDGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ query_type: "off_days" }),
-      });
-
-      if (!response.ok) return;
-      const json = await response.json();
-      if (json.off_days) {
-        offDays = new Set(json.off_days);
-      }
-    } catch (err) {
-      console.error("Failed to load off days", err);
+Deno.serve(async (req: Request) => {
+  try {
+    if (req.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
     }
-  }
 
-  await fetchOffDays();
+    if (req.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+    }
 
-  // ──────────────────────────────────────────────
-  //                 إرسال النموذج
-  // ──────────────────────────────────────────────
-  if (form) {
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      messageDiv.classList.remove('booking-form__message--hidden', 'success', 'error');
-      messageDiv.textContent = isArabic ? 'جاري الإرسال...' : 'Submitting...';
-
-      const formData = new FormData(form);
-
-      try {
-        const lang = document.documentElement.lang || 'ar';
-        const response = await fetch(`/api/reschedule?lang=${lang}`, {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-          messageDiv.classList.add('success');
-          messageDiv.textContent = result.message || successMsg;
-
-          form.querySelector('button[type="submit"]').disabled = true;
-
-          document.getElementById('date-trigger').textContent = dateTriggerDefault;
-          document.getElementById('time-trigger').textContent = timeTriggerDefault;
-          document.getElementById('appointment_date').value = '';
-          document.getElementById('appointment_time').value = '';
-
-          document.getElementById('date-dropdown')?.classList.add('hidden');
-          document.getElementById('time-dropdown')?.classList.add('hidden');
-        } else {
-          throw new Error(result.error || errorMsgBase);
-        }
-      } catch (err) {
-        messageDiv.classList.add('error');
-        messageDiv.textContent = err.message || errorMsgBase;
-      }
-    });
-  }
-
-  // ──────────────────────────────────────────────
-  //     جلب المواعيد المحجوزة لتاريخ معين
-  // ──────────────────────────────────────────────
-  async function getBookedTimesForDate(dateStr) {
+    let body;
     try {
-      const response = await fetch(EDGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ date: dateStr }),
-      });
-
-      if (!response.ok) return new Set();
-      const json = await response.json();
-      if (json.error) return new Set();
-      const booked = json.booked || [];
-      return new Set(Array.isArray(booked) ? booked : []);
+      body = await req.json();
     } catch {
-      return new Set();
+      return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
-  }
 
-  // ──────────────────────────────────────────────
-  //               التواريخ dropdown – فقط الأيام المتاحة
-  // ──────────────────────────────────────────────
-  const dateTrigger = document.getElementById('date-trigger');
-  const dateDropdown = document.getElementById('date-dropdown');
-  const dateScroll = document.getElementById('date-scroll');
-  const dateHidden = document.getElementById('appointment_date');
+    const { date, query_type = "booked_times", days = 15 } = body ?? {};
 
-  async function generateDates() {
-    if (!dateScroll) return;
-    dateScroll.innerHTML = '<div class="scroll-item disabled">جاري التحميل...</div>';
+    if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      return new Response(
+        JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    try {
-      const response = await fetch(EDGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ 
-          query_type: "available_dates_next_days",
-          days: 15 
-        }),
+    // 1. جلب الأيام المعطلة
+    if (query_type === "off_days") {
+      const { data, error } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", new Date().toISOString().split("T")[0])
+        .order("date", { ascending: true });
+
+      if (error) {
+        console.error("Off days query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في جلب الأيام المعطلة" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const off_days = (data || []).map(row => row.date);
+      return new Response(JSON.stringify({ off_days }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // 2. ساعات العمل ليوم معين
+    if (query_type === "working_hours_for_date") {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const d = new Date(date);
+      const dow = d.getDay();
+
+      const { data, error } = await supabase
+        .from("working_hours")
+        .select("is_open, start_time, end_time, slot_duration_minutes")
+        .eq("day_of_week", dow)
+        .eq("is_open", true)
+        .single();
+
+      if (error || !data) {
+        console.error("Working hours query error:", error);
+        return new Response(JSON.stringify({ error: "لا توجد ساعات عمل لهذا اليوم" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // 3. المواعيد المتاحة في الـ N يوم القادمة
+    if (query_type === "available_dates_next_days") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const futureDate = new Date(today);
+      futureDate.setDate(today.getDate() + days);
+
+      const { data: offData } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", today.toISOString().split("T")[0])
+        .lte("date", futureDate.toISOString().split("T")[0]);
+
+      const offDaysSet = new Set(offData?.map(r => r.date) || []);
+
+      const { data: hoursData } = await supabase
+        .from("working_hours")
+        .select("day_of_week, is_open, start_time, end_time, slot_duration_minutes");
+
+      const hoursMap = new Map<number, any>();
+      hoursData?.forEach(h => hoursMap.set(h.day_of_week, h));
+
+      const { data: bookings } = await supabase
+        .from("appointments")
+        .select("appointment_date, appointment_time")
+        .gte("appointment_date", today.toISOString().split("T")[0])
+        .lte("appointment_date", futureDate.toISOString().split("T")[0]);
+
+      const bookedByDate = new Map<string, Set<string>>();
+      bookings?.forEach(b => {
+        const d = b.appointment_date;
+        if (!bookedByDate.has(d)) bookedByDate.set(d, new Set());
+        bookedByDate.get(d)!.add(b.appointment_time.substring(0, 5));
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      const availableDates: string[] = [];
 
-      const json = await response.json();
-      const availableDates = json.available_dates || [];
+      for (let i = 0; i < days; i++) {
+        const current = new Date(today);
+        current.setDate(today.getDate() + i);
+        const dateStr = current.toISOString().split("T")[0];
 
-      dateScroll.innerHTML = '';
+        if (offDaysSet.has(dateStr)) continue;
 
-      if (availableDates.length === 0) {
-        dateScroll.innerHTML = `<div class="scroll-item disabled">لا توجد مواعيد متاحة في الفترة القادمة</div>`;
-        return;
-      }
+        const dow = current.getDay();
+        const config = hoursMap.get(dow);
 
-      for (const dateStr of availableDates) {
-        const d = new Date(dateStr);
-        const dayName   = d.toLocaleDateString(locale, { weekday: 'long' });
-        const monthName = d.toLocaleDateString(locale, { month: 'long' });
-        const dayNum    = d.getDate().toString().padStart(2, '0');
-        const year      = d.getFullYear();
+        if (!config || !config.is_open || !config.start_time || !config.end_time) {
+          continue;
+        }
 
-        const display = isArabic
-          ? `${dayName} ${dayNum} ${monthName} ${year}`
-          : `${dayName}, ${monthName} ${dayNum}, ${year}`;
+        const [sh, sm] = config.start_time.split(":").map(Number);
+        const [eh, em] = config.end_time.split(":").map(Number);
+        const totalMin = (eh * 60 + em) - (sh * 60 + sm);
+        const slotMin = config.slot_duration_minutes || 15;
+        const maxSlots = Math.floor(totalMin / slotMin);
 
-        const item = document.createElement('div');
-        item.className = 'scroll-item';
-        item.dataset.value = dateStr;
-        item.textContent = display;
-        dateScroll.appendChild(item);
-      }
+        if (maxSlots <= 0) continue;
 
-    } catch (err) {
-      console.error("Error loading available dates:", err);
-      dateScroll.innerHTML = `<div class="scroll-item disabled">حدث خطأ أثناء تحميل التواريخ</div>`;
-    }
-  }
+        const bookedSet = bookedByDate.get(dateStr) || new Set();
+        const bookedCount = bookedSet.size;
 
-  if (dateScroll) {
-    dateScroll.addEventListener('click', (e) => {
-      const item = e.target.closest('.scroll-item');
-      if (!item || item.classList.contains('disabled')) return;
-      dateScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
-      item.classList.add('selected');
-    });
-  }
-
-  if (dateTrigger) {
-    dateTrigger.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const isOpen = !dateDropdown.classList.contains('hidden');
-
-      document.getElementById('time-dropdown')?.classList.add('hidden');
-
-      if (isOpen) {
-        dateDropdown.classList.add('hidden');
-      } else {
-        await generateDates();
-        dateDropdown.classList.remove('hidden');
-
-        if (dateHidden.value) {
-          const sel = dateScroll.querySelector(`[data-value="${dateHidden.value}"]`);
-          if (sel) {
-            sel.classList.add('selected');
-            sel.scrollIntoView({ block: 'center', behavior: 'instant' });
+        let isTodayAndPassed = false;
+        if (i === 0) {
+          const now = new Date();
+          const dayEnd = new Date(current);
+          dayEnd.setHours(eh, em, 0, 0);
+          if (now > dayEnd) {
+            isTodayAndPassed = true;
           }
         }
-      }
-    });
-  }
 
-  // ──────────────────────────────────────────────
-  //               الأوقات dropdown – ديناميكي من working_hours
-  // ──────────────────────────────────────────────
-  const timeTrigger = document.getElementById('time-trigger');
-  const timeDropdown = document.getElementById('time-dropdown');
-  const timeScroll = document.getElementById('time-scroll');
-  const timeHidden = document.getElementById('appointment_time');
-
-  async function generateTimes() {
-    if (!timeScroll) return;
-    timeScroll.innerHTML = '<div class="scroll-item disabled">جاري التحميل...</div>';
-
-    const selectedDate = dateHidden.value;
-    if (!selectedDate) {
-      timeScroll.innerHTML = `<div class="scroll-item disabled">${selectDateFirstMsg}</div>`;
-      return;
-    }
-
-    // 1. جلب ساعات العمل الديناميكية من working_hours عبر Edge Function
-    let config;
-    try {
-      const response = await fetch(EDGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ 
-          query_type: "working_hours_for_date",
-          date: selectedDate
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      config = await response.json();
-    } catch (err) {
-      console.error("Error loading working hours:", err);
-      timeScroll.innerHTML = `<div class="scroll-item disabled">خطأ في جلب ساعات العمل</div>`;
-      return;
-    }
-
-    if (!config || !config.start_time || !config.end_time) {
-      timeScroll.innerHTML = `<div class="scroll-item disabled">${noTimesAvailableMsg}</div>`;
-      return;
-    }
-
-    // 2. جلب الحجوزات المحجوزة
-    const booked = await getBookedTimesForDate(selectedDate);
-
-    // 3. حساب الدقائق من start_time و end_time
-    const [startH, startM] = config.start_time.split(':').map(Number);
-    const [endH, endM] = config.end_time.split(':').map(Number);
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-    const slotDuration = config.slot_duration_minutes || 15;
-
-    // 4. التحقق من اليوم الحالي (أقرب موعد بعد ساعة)
-    const now = new Date();
-    const selectedDateObj = new Date(selectedDate);
-    const isToday = 
-      selectedDateObj.getFullYear() === now.getFullYear() &&
-      selectedDateObj.getMonth() === now.getMonth() &&
-      selectedDateObj.getDate() === now.getDate();
-
-    let minStartMinutes = startMinutes;
-    if (isToday) {
-      const earliestAllowed = new Date(now.getTime() + 60 * 60 * 1000);  // بعد ساعة
-      let minutes = earliestAllowed.getHours() * 60 + earliestAllowed.getMinutes();
-      const remainder = minutes % slotDuration;
-      if (remainder !== 0) {
-        minutes += slotDuration - remainder;  // تقريب لأعلى إلى أقرب فتحة
-      }
-      minStartMinutes = Math.max(minutes, startMinutes);
-    }
-
-    // 5. توليد الفتحات المتاحة ديناميكيًا
-    let hasAvailable = false;
-    timeScroll.innerHTML = '';
-
-    for (let m = minStartMinutes; m < endMinutes; m += slotDuration) {
-      const hour = Math.floor(m / 60);
-      const minute = m % 60;
-      const time24 = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-
-      if (booked.has(time24)) continue;
-
-      hasAvailable = true;
-
-      let display = isArabic
-        ? (hour === 12 ? `12:${minute.toString().padStart(2, '0')} ظهرًا`
-           : hour > 12 ? `${(hour - 12).toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} مساءً`
-           : `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} صباحًا`)
-        : `${(hour % 12 || 12)}:${minute.toString().padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
-
-      const item = document.createElement('div');
-      item.className = 'scroll-item';
-      item.dataset.value = time24;
-      item.textContent = display;
-      timeScroll.appendChild(item);
-    }
-
-    if (!hasAvailable) {
-      timeScroll.innerHTML = `<div class="scroll-item disabled">${noTimesAvailableMsg}</div>`;
-    }
-  }
-
-  if (timeScroll) {
-    timeScroll.addEventListener('click', (e) => {
-      const item = e.target.closest('.scroll-item');
-      if (!item) return;
-      timeScroll.querySelectorAll('.scroll-item').forEach(el => el.classList.remove('selected'));
-      item.classList.add('selected');
-    });
-  }
-
-  if (timeTrigger) {
-    timeTrigger.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const isOpen = !timeDropdown.classList.contains('hidden');
-
-      document.getElementById('date-dropdown')?.classList.add('hidden');
-
-      if (isOpen) {
-        timeDropdown.classList.add('hidden');
-      } else {
-        await generateTimes();
-        timeDropdown.classList.remove('hidden');
-
-        if (timeHidden.value) {
-          const sel = timeScroll.querySelector(`[data-value="${timeHidden.value}"]`);
-          if (sel) {
-            sel.classList.add('selected');
-            sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          }
+        if (!isTodayAndPassed && bookedCount < maxSlots) {
+          availableDates.push(dateStr);
         }
       }
-    });
-  }
 
-  // إغلاق القوائم المنسدلة عند النقر خارجها
-  document.addEventListener('click', (e) => {
-    if (!dateTrigger?.contains(e.target) && !dateDropdown?.contains(e.target)) {
-      dateDropdown?.classList.add('hidden');
-    }
-    if (!timeTrigger?.contains(e.target) && !timeDropdown?.contains(e.target)) {
-      timeDropdown?.classList.add('hidden');
-    }
-  });
-
-  // اختيار العنصر وإغلاق القائمة
-  [dateScroll, timeScroll].forEach(scroll => {
-    if (scroll) {
-      scroll.addEventListener('click', (e) => {
-        const item = e.target.closest('.scroll-item');
-        if (!item || item.classList.contains('disabled')) return;
-
-        const trigger  = scroll.id === 'date-scroll' ? dateTrigger : timeTrigger;
-        const hidden   = scroll.id === 'date-scroll' ? dateHidden : timeHidden;
-        const dropdown = scroll.id === 'date-scroll' ? dateDropdown : timeDropdown;
-
-        if (trigger && hidden && dropdown) {
-          trigger.textContent = item.textContent;
-          hidden.value = item.dataset.value;
-          dropdown.classList.add('hidden');
-        }
+      return new Response(JSON.stringify({ available_dates: availableDates }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-  });
 
-</script>
+    // 4. المواعيد المحجوزة ليوم معين (الافتراضي)
+    if (query_type === "booked_times" || !query_type) {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("appointment_time")
+        .eq("appointment_date", date);
+
+      if (error) {
+        console.error("Booked times query error:", error);
+        return new Response(JSON.stringify({ error: "خطأ في قاعدة البيانات" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const booked = (Array.isArray(data) ? data : [])
+        .map(row => row?.appointment_time?.substring(0, 5))
+        .filter(Boolean);
+
+      return new Response(JSON.stringify({ booked }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    console.error("Edge Function error:", err?.stack ?? err);
+    return new Response(
+      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});   // ← القوس الناقص كان هنا — تم إضافته
