@@ -4,73 +4,47 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")      ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const ALLOWED_ORIGIN    = Deno.env.get("ALLOWED_ORIGIN")    ?? "*";   // في الإنتاج → https://your-domain.com
+const ALLOWED_ORIGIN    = Deno.env.get("ALLOWED_ORIGIN")    ?? "*";  // في الإنتاج غيّره لـ https://new-91v.pages.dev
 
-// إنشاء عميل Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ──────────────────────────────────────────────
-//  دالة مساعدة تضيف رؤوس CORS لكل رد
-// ──────────────────────────────────────────────
+// ─── دالة مساعدة لإضافة CORS headers لكل رد ───
 function withCors(response: Response): Response {
   const headers = new Headers(response.headers);
-
   headers.set("Access-Control-Allow-Origin",      ALLOWED_ORIGIN);
   headers.set("Access-Control-Allow-Methods",     "POST, OPTIONS");
-  headers.set("Access-Control-Allow-Headers",     "Content-Type, apikey, Authorization");
+  headers.set("Access-Control-Allow-Headers",     "Content-Type, apikey, Authorization, x-client-info");
   headers.set("Access-Control-Allow-Credentials", "true");
-
-  return new Response(response.body, {
-    ...response,
-    headers,
-  });
+  return new Response(response.body, { ...response, headers });
 }
 
-// ──────────────────────────────────────────────
-//  الرد على طلبات الـ preflight (OPTIONS)
-// ──────────────────────────────────────────────
+// ─── التعامل مع طلبات OPTIONS (preflight) ───
 export function OPTIONS(): Response {
   return withCors(
     new Response(null, { status: 204 })
   );
 }
 
-// ──────────────────────────────────────────────
-//  دوال مساعدة (يمكنك نقلها إلى ملف منفصل إذا أردت)
-// ──────────────────────────────────────────────
-
+// ─── باقي الدوال المساعدة (انسخها من النسخة السابقة أو احتفظ بيها) ───
 async function getBusinessTimezone(): Promise<string> {
-  const { data } = await supabase
-    .from('business_settings')
-    .select('timezone')
-    .maybeSingle();
-
+  const { data } = await supabase.from('business_settings').select('timezone').maybeSingle();
   return data?.timezone || 'Africa/Cairo';
 }
 
 function getDayOfWeekInTimezone(dateStr: string, timezone: string): number {
   const dateForDay = new Date(`${dateStr}T12:00:00`);
-  const dayNameShort = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    weekday: 'short'
-  }).format(dateForDay);
-
-  const dayMap: Record<string, number> = {
-    'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
-  };
-
+  const dayNameShort = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(dateForDay);
+  const dayMap: Record<string, number> = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
   return dayMap[dayNameShort] ?? 0;
 }
 
 async function getWorkingHoursForDate(dateStr: string, timezone: string) {
   const dayOfWeek = getDayOfWeekInTimezone(dateStr, timezone);
-
   const { data } = await supabase
     .from('working_hours')
     .select('start_time, end_time, slot_duration_minutes, break_start, break_end, is_closed')
     .eq('day_of_week', dayOfWeek)
     .maybeSingle();
-
   if (!data || data.is_closed) return null;
   return data;
 }
@@ -81,25 +55,16 @@ async function getBookedTimesForDate(dateStr: string, timezone: string): Promise
     .select('date_time')
     .gte('date_time', `${dateStr}T00:00:00`)
     .lt('date_time', `${dateStr}T23:59:59`);
-
   const booked = new Set<string>();
-
   if (!data) return booked;
 
-  const timeFormatter = new Intl.DateTimeFormat('en', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-
+  const timeFormatter = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false });
   for (const row of data) {
     if (row.date_time) {
       const localTime = timeFormatter.format(new Date(row.date_time));
       booked.add(localTime);
     }
   }
-
   return booked;
 }
 
@@ -108,94 +73,45 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
-// ──────────────────────────────────────────────
-//  المعالج الرئيسي (POST)
-// ──────────────────────────────────────────────
+// ─── المعالج الرئيسي POST ───
 export async function POST({ request }: { request: Request }): Promise<Response> {
-  // التعامل مع طلبات OPTIONS تم بالفعل في دالة منفصلة
-
   try {
     const body = await request.json();
     const { query_type, date, days = 15 } = body;
 
-    if (!query_type) {
-      return withCors(
-        new Response(JSON.stringify({ error: "query_type is required" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        })
-      );
-    }
-
     const timezone = await getBusinessTimezone();
 
-    // 1. جلب أيام العطل
     if (query_type === "off_days") {
       const { data } = await supabase.from('off_days').select('date');
-      return withCors(
-        new Response(JSON.stringify({ off_days: data?.map(d => d.date) || [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-      );
+      return withCors(new Response(JSON.stringify({ off_days: data?.map(d => d.date) || [] }), { status: 200 }));
     }
 
-    // 2. التواريخ المتاحة في الـ 15 يوم القادمة
     if (query_type === "available_dates_next_days") {
       const now = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
       const currentLocalStr = formatter.format(now);
       const currentLocal = new Date(currentLocalStr);
 
       const available: string[] = [];
-      const offDaysSet = new Set(
-        (await supabase.from('off_days').select('date')).data?.map(d => d.date) || []
-      );
+      const offDaysSet = new Set((await supabase.from('off_days').select('date')).data?.map(d => d.date) || []);
 
       for (let i = 0; i < days; i++) {
         const d = new Date(currentLocal);
         d.setDate(d.getDate() + i);
         const dateStr = d.toISOString().split('T')[0];
-
         if (offDaysSet.has(dateStr)) continue;
-
         const wh = await getWorkingHoursForDate(dateStr, timezone);
         if (wh) available.push(dateStr);
       }
 
-      return withCors(
-        new Response(JSON.stringify({ available_dates: available }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-      );
+      return withCors(new Response(JSON.stringify({ available_dates: available }), { status: 200 }));
     }
 
-    // 3. الأوقات المتاحة لتاريخ محدد
     if (query_type === "available_times_for_date") {
-      if (!date) {
-        return withCors(
-          new Response(JSON.stringify({ available_times: [] }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          })
-        );
-      }
+      if (!date) return withCors(new Response(JSON.stringify({ available_times: [] }), { status: 200 }));
 
       const config = await getWorkingHoursForDate(date, timezone);
-      if (!config) {
-        return withCors(
-          new Response(JSON.stringify({ available_times: [] }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          })
-        );
-      }
+      if (!config) return withCors(new Response(JSON.stringify({ available_times: [] }), { status: 200 }));
 
       const booked = await getBookedTimesForDate(date, timezone);
 
@@ -207,72 +123,38 @@ export async function POST({ request }: { request: Request }): Promise<Response>
       const breakEndMin   = config.break_end   ? timeToMinutes(config.break_end)   : null;
 
       const now = new Date();
-      const dateF = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
+      const dateF = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
       const isToday = dateF.format(now) === date;
 
       let minStartMinutes = startMinutes;
       if (isToday) {
-        const timeF = new Intl.DateTimeFormat('en', {
-          timeZone: timezone,
-          hour: 'numeric',
-          minute: 'numeric',
-          hour12: false
-        });
+        const timeF = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false });
         const [currH, currM] = timeF.format(now).split(':').map(Number);
-        let minutes = currH * 60 + currM + 60; // بعد ساعة
+        let minutes = currH * 60 + currM + 60;
         const remainder = minutes % slotDuration;
         if (remainder !== 0) minutes += slotDuration - remainder;
         minStartMinutes = Math.max(minutes, startMinutes);
       }
 
       const availableTimes: string[] = [];
-
       for (let m = minStartMinutes; m < endMinutes; m += slotDuration) {
         const hour   = Math.floor(m / 60);
         const minute = m % 60;
         const time24 = `\( {hour.toString().padStart(2, '0')}: \){minute.toString().padStart(2, '0')}`;
 
         if (booked.has(time24)) continue;
-
-        if (breakStartMin !== null && breakEndMin !== null) {
-          if (m >= breakStartMin && m < breakEndMin) continue;
-        }
+        if (breakStartMin !== null && breakEndMin !== null && m >= breakStartMin && m < breakEndMin) continue;
 
         availableTimes.push(time24);
       }
 
-      return withCors(
-        new Response(JSON.stringify({ available_times: availableTimes }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-      );
+      return withCors(new Response(JSON.stringify({ available_times: availableTimes }), { status: 200 }));
     }
 
-    // إذا لم يتطابق أي query_type
-    return withCors(
-      new Response(JSON.stringify({ error: "Invalid query_type" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
+    return withCors(new Response(JSON.stringify({ error: "Invalid query_type" }), { status: 400 }));
 
   } catch (err) {
-    console.error("Edge Function Error:", err);
-
-    return withCors(
-      new Response(JSON.stringify({
-        error: "Internal server error",
-        message: err instanceof Error ? err.message : String(err)
-      }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
+    console.error(err);
+    return withCors(new Response(JSON.stringify({ error: "Internal error", details: String(err) }), { status: 500 }));
   }
 }
