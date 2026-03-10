@@ -1,160 +1,273 @@
 // supabase/functions/check-booked-times/index.ts
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
-const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")      ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const ALLOWED_ORIGIN    = Deno.env.get("ALLOWED_ORIGIN")    ?? "*";  // في الإنتاج غيّره لـ https://new-91v.pages.dev
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-// ─── دالة مساعدة لإضافة CORS headers لكل رد ───
-function withCors(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set("Access-Control-Allow-Origin",      ALLOWED_ORIGIN);
-  headers.set("Access-Control-Allow-Methods",     "POST, OPTIONS");
-  headers.set("Access-Control-Allow-Headers",     "Content-Type, apikey, Authorization, x-client-info");
-  headers.set("Access-Control-Allow-Credentials", "true");
-  return new Response(response.body, { ...response, headers });
-}
+const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false },
+  global: { headers: { "x-client-info": "check-booked-times" } },
+});
 
-// ─── التعامل مع طلبات OPTIONS (preflight) ───
-export function OPTIONS(): Response {
-  return withCors(
-    new Response(null, { status: 204 })
-  );
-}
-
-// ─── باقي الدوال المساعدة (انسخها من النسخة السابقة أو احتفظ بيها) ───
-async function getBusinessTimezone(): Promise<string> {
-  const { data } = await supabase.from('business_settings').select('timezone').maybeSingle();
-  return data?.timezone || 'Africa/Cairo';
-}
-
-function getDayOfWeekInTimezone(dateStr: string, timezone: string): number {
-  const dateForDay = new Date(`${dateStr}T12:00:00`);
-  const dayNameShort = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(dateForDay);
-  const dayMap: Record<string, number> = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
-  return dayMap[dayNameShort] ?? 0;
-}
-
-async function getWorkingHoursForDate(dateStr: string, timezone: string) {
-  const dayOfWeek = getDayOfWeekInTimezone(dateStr, timezone);
-  const { data } = await supabase
-    .from('working_hours')
-    .select('start_time, end_time, slot_duration_minutes, break_start, break_end, is_closed')
-    .eq('day_of_week', dayOfWeek)
-    .maybeSingle();
-  if (!data || data.is_closed) return null;
-  return data;
-}
-
-async function getBookedTimesForDate(dateStr: string, timezone: string): Promise<Set<string>> {
-  const { data } = await supabase
-    .from('appointments')
-    .select('date_time')
-    .gte('date_time', `${dateStr}T00:00:00`)
-    .lt('date_time', `${dateStr}T23:59:59`);
-  const booked = new Set<string>();
-  if (!data) return booked;
-
-  const timeFormatter = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false });
-  for (const row of data) {
-    if (row.date_time) {
-      const localTime = timeFormatter.format(new Date(row.date_time));
-      booked.add(localTime);
-    }
+Deno.serve(async (req: Request) => {
+  // ─── التعامل مع طلب OPTIONS (preflight) ───
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
   }
-  return booked;
-}
 
-function timeToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
-}
+  // ─── رفض أي طريقة غير POST ───
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+  }
 
-// ─── المعالج الرئيسي POST ───
-export async function POST({ request }: { request: Request }): Promise<Response> {
+  // ─── قراءة الـ body ───
+  let body;
   try {
-    const body = await request.json();
-    const { query_type, date, days = 15 } = body;
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Bad JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
-    const timezone = await getBusinessTimezone();
+  const { query_type = "booked_times", date, days = 15 } = body ?? {};
 
+  // التحقق من صيغة التاريخ إذا وُجد
+  if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+    return new Response(
+      JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    // 1. جلب الأيام المعطلة
     if (query_type === "off_days") {
-      const { data } = await supabase.from('off_days').select('date');
-      return withCors(new Response(JSON.stringify({ off_days: data?.map(d => d.date) || [] }), { status: 200 }));
+      const { data, error } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", new Date().toISOString().split("T")[0])
+        .order("date", { ascending: true });
+
+      if (error) throw error;
+
+      const off_days = (data || []).map(row => row.date);
+      return new Response(JSON.stringify({ off_days }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    if (query_type === "available_dates_next_days") {
-      const now = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-      const currentLocalStr = formatter.format(now);
-      const currentLocal = new Date(currentLocalStr);
+    // 2. ساعات العمل ليوم معين (ديناميكي من working_hours)
+    if (query_type === "working_hours_for_date") {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-      const available: string[] = [];
-      const offDaysSet = new Set((await supabase.from('off_days').select('date')).data?.map(d => d.date) || []);
+      const d = new Date(date);
+      const dow = d.getDay();
+
+      const { data, error } = await supabase
+        .from("working_hours")
+        .select("is_closed, start_time, end_time, slot_duration_minutes, break_start, break_end")
+        .eq("day_of_week", dow)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data || data.is_closed) {
+        return new Response(JSON.stringify({ error: "اليوم مغلق" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        start_time: data.start_time,
+        end_time: data.end_time,
+        slot_duration_minutes: data.slot_duration_minutes || 15,
+        break_start: data.break_start,
+        break_end: data.break_end,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // 3. التواريخ المتاحة في الأيام القادمة (مع التحقق من working_hours)
+    if (query_type === "available_dates_next_days") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const futureDate = new Date(today);
+      futureDate.setDate(today.getDate() + days);
+
+      const { data: offData } = await supabase
+        .from("off_days")
+        .select("date")
+        .gte("date", today.toISOString().split("T")[0])
+        .lte("date", futureDate.toISOString().split("T")[0]);
+
+      const offDaysSet = new Set(offData?.map(r => r.date) || []);
+
+      const { data: hoursData } = await supabase
+        .from("working_hours")
+        .select("day_of_week, is_closed");
+
+      const openDays = new Set(
+        hoursData?.filter(h => !h.is_closed).map(h => h.day_of_week) || []
+      );
+
+      const availableDates: string[] = [];
 
       for (let i = 0; i < days; i++) {
-        const d = new Date(currentLocal);
-        d.setDate(d.getDate() + i);
-        const dateStr = d.toISOString().split('T')[0];
+        const current = new Date(today);
+        current.setDate(today.getDate() + i);
+        const dateStr = current.toISOString().split("T")[0];
+        const dow = current.getDay();
+
         if (offDaysSet.has(dateStr)) continue;
-        const wh = await getWorkingHoursForDate(dateStr, timezone);
-        if (wh) available.push(dateStr);
+        if (!openDays.has(dow)) continue;
+
+        availableDates.push(dateStr);
       }
 
-      return withCors(new Response(JSON.stringify({ available_dates: available }), { status: 200 }));
+      return new Response(JSON.stringify({ available_dates: availableDates }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
+    // 4. الأوقات المتاحة لتاريخ معين (الإضافة الجديدة المهمة)
     if (query_type === "available_times_for_date") {
-      if (!date) return withCors(new Response(JSON.stringify({ available_times: [] }), { status: 200 }));
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-      const config = await getWorkingHoursForDate(date, timezone);
-      if (!config) return withCors(new Response(JSON.stringify({ available_times: [] }), { status: 200 }));
+      const d = new Date(date);
+      const dow = d.getDay();
 
-      const booked = await getBookedTimesForDate(date, timezone);
+      const { data: config, error: configError } = await supabase
+        .from("working_hours")
+        .select("is_closed, start_time, end_time, slot_duration_minutes, break_start, break_end")
+        .eq("day_of_week", dow)
+        .maybeSingle();
 
-      const startMinutes = timeToMinutes(config.start_time);
-      const endMinutes   = timeToMinutes(config.end_time);
-      const slotDuration = config.slot_duration_minutes || 15;
+      if (configError) throw configError;
+      if (!config || config.is_closed) {
+        return new Response(JSON.stringify({ available_times: [] }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-      const breakStartMin = config.break_start ? timeToMinutes(config.break_start) : null;
-      const breakEndMin   = config.break_end   ? timeToMinutes(config.break_end)   : null;
+      // جلب المواعيد المحجوزة لهذا اليوم
+      const { data: bookedData } = await supabase
+        .from("appointments")
+        .select("appointment_time")
+        .eq("appointment_date", date);
 
+      const booked = new Set(
+        bookedData?.map(r => r.appointment_time.substring(0, 5)) || []
+      );
+
+      const startMin = timeToMinutes(config.start_time);
+      const endMin   = timeToMinutes(config.end_time);
+      const slotMin  = config.slot_duration_minutes || 15;
+
+      const breakStart = config.break_start ? timeToMinutes(config.break_start) : null;
+      const breakEnd   = config.break_end   ? timeToMinutes(config.break_end)   : null;
+
+      // التحقق إذا كان اليوم الحالي لتجنب الأوقات الماضية
       const now = new Date();
-      const dateF = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-      const isToday = dateF.format(now) === date;
+      const isToday = now.toISOString().split("T")[0] === date;
+      let minStart = startMin;
 
-      let minStartMinutes = startMinutes;
       if (isToday) {
-        const timeF = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false });
-        const [currH, currM] = timeF.format(now).split(':').map(Number);
-        let minutes = currH * 60 + currM + 60;
-        const remainder = minutes % slotDuration;
-        if (remainder !== 0) minutes += slotDuration - remainder;
-        minStartMinutes = Math.max(minutes, startMinutes);
+        const currentMin = now.getHours() * 60 + now.getMinutes() + 60; // بعد ساعة
+        const remainder = currentMin % slotMin;
+        if (remainder !== 0) currentMin += slotMin - remainder;
+        minStart = Math.max(currentMin, startMin);
       }
 
-      const availableTimes: string[] = [];
-      for (let m = minStartMinutes; m < endMinutes; m += slotDuration) {
-        const hour   = Math.floor(m / 60);
-        const minute = m % 60;
-        const time24 = `\( {hour.toString().padStart(2, '0')}: \){minute.toString().padStart(2, '0')}`;
+      const available: string[] = [];
 
-        if (booked.has(time24)) continue;
-        if (breakStartMin !== null && breakEndMin !== null && m >= breakStartMin && m < breakEndMin) continue;
+      for (let m = minStart; m < endMin; m += slotMin) {
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        const timeStr = `\( {h.toString().padStart(2, "0")}: \){min.toString().padStart(2, "0")}`;
 
-        availableTimes.push(time24);
+        if (booked.has(timeStr)) continue;
+
+        // استبعاد فترة الراحة
+        if (breakStart !== null && breakEnd !== null && m >= breakStart && m < breakEnd) {
+          continue;
+        }
+
+        available.push(timeStr);
       }
 
-      return withCors(new Response(JSON.stringify({ available_times: availableTimes }), { status: 200 }));
+      return new Response(JSON.stringify({ available_times: available }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    return withCors(new Response(JSON.stringify({ error: "Invalid query_type" }), { status: 400 }));
+    // 5. المواعيد المحجوزة (الافتراضي)
+    if (query_type === "booked_times" || !query_type) {
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("appointment_time")
+        .eq("appointment_date", date);
+
+      if (error) throw error;
+
+      const booked = (data || [])
+        .map(row => row?.appointment_time?.substring(0, 5))
+        .filter(Boolean);
+
+      return new Response(JSON.stringify({ booked }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
   } catch (err) {
-    console.error(err);
-    return withCors(new Response(JSON.stringify({ error: "Internal error", details: String(err) }), { status: 500 }));
+    console.error("Edge Function error:", err?.stack ?? err);
+    return new Response(
+      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
+});
+
+// دالة مساعدة لتحويل الوقت إلى دقائق
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
 }
