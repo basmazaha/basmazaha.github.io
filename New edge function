@@ -1,5 +1,3 @@
-// supabase/functions/check-booked-times/index.ts
-
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
 const corsHeaders = {
@@ -37,7 +35,7 @@ Deno.serve(async (req: Request) => {
 
   const { query_type = "booked_times", date, days = 15 } = body ?? {};
 
-  // التحقق من صيغة التاريخ
+  // التحقق من صيغة التاريخ إذا وُجد
   if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
     return new Response(
       JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
@@ -65,10 +63,15 @@ Deno.serve(async (req: Request) => {
     }
 
     // ──────────────────────────────────────────────
-    // 2. ساعات العمل ليوم معين (ديناميكي)
+    // 2. ساعات العمل ليوم معين
     // ──────────────────────────────────────────────
     if (query_type === "working_hours_for_date") {
-      if (!date) throw new Error("التاريخ مطلوب");
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       const dow = await getDayOfWeekInBusinessTimezone(date);
       const { data, error } = await supabase
@@ -91,7 +94,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ──────────────────────────────────────────────
-    // 3. التواريخ المتاحة في الـ 15 يوم القادمة (الإصلاح الرئيسي)
+    // 3. التواريخ المتاحة في الـ 15 يوم القادمة
     // ──────────────────────────────────────────────
     if (query_type === "available_dates_next_days") {
       const timezone = await getBusinessTimezone();
@@ -135,19 +138,24 @@ Deno.serve(async (req: Request) => {
     }
 
     // ──────────────────────────────────────────────
-    // 4. الأوقات المتاحة لتاريخ معين (مع break)
+    // 4. الأوقات المتاحة لتاريخ معين
     // ──────────────────────────────────────────────
     if (query_type === "available_times_for_date") {
-      if (!date) throw new Error("التاريخ مطلوب");
+      if (!date) {
+        return new Response(JSON.stringify({ available_times: [] }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       const dow = await getDayOfWeekInBusinessTimezone(date);
-      const { data: config, error } = await supabase
+      const { data: config, error: configError } = await supabase
         .from("working_hours")
         .select("is_open, start_time, end_time, slot_duration_minutes, break_start, break_end")
         .eq("day_of_week", dow)
         .maybeSingle();
 
-      if (error || !config || !config.is_open) {
+      if (configError || !config || !config.is_open) {
         return new Response(JSON.stringify({ available_times: [] }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -176,7 +184,7 @@ Deno.serve(async (req: Request) => {
       for (let m = minStart; m < endMin; m += slot) {
         const h = Math.floor(m / 60);
         const min = m % 60;
-        const t = `\( {h.toString().padStart(2,"0")}: \){min.toString().padStart(2,"0")}`;
+        const t = `\( {h.toString().padStart(2, "0")}: \){min.toString().padStart(2, "0")}`;
 
         if (booked.has(t)) continue;
         if (breakStart !== null && breakEnd !== null && m >= breakStart && m < breakEnd) continue;
@@ -191,17 +199,18 @@ Deno.serve(async (req: Request) => {
     }
 
     // ──────────────────────────────────────────────
-    // 5. المواعيد المحجوزة (الافتراضي)
+    // 5. المواعيد المحجوزة ليوم معين (الاعتماد الكامل على date_time)
     // ──────────────────────────────────────────────
     if (query_type === "booked_times" || !query_type) {
-      if (!date) throw new Error("التاريخ مطلوب");
-      const { data } = await supabase
-        .from("appointments")
-        .select("appointment_time")
-        .eq("appointment_date", date);
+      if (!date) {
+        return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-      const booked = (data || []).map(r => r.appointment_time?.substring(0,5)).filter(Boolean);
-      return new Response(JSON.stringify({ booked }), {
+      const booked = await getBookedTimes(date);
+      return new Response(JSON.stringify({ booked: Array.from(booked) }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -222,7 +231,7 @@ Deno.serve(async (req: Request) => {
 });
 
 // ──────────────────────────────────────────────
-// دوال مساعدة
+// دوال مساعدة – معدلة للاعتماد على date_time فقط
 // ──────────────────────────────────────────────
 
 async function getBusinessTimezone(): Promise<string> {
@@ -238,12 +247,44 @@ async function getDayOfWeekInBusinessTimezone(dateStr: string): Promise<number> 
   return map[dayShort] ?? 0;
 }
 
+/**
+ * جلب الأوقات المحجوزة ليوم معين من حقل date_time فقط
+ */
 async function getBookedTimes(date: string): Promise<Set<string>> {
-  const { data } = await supabase
+  const timezone = await getBusinessTimezone();
+
+  // نطاق اليوم كاملاً بتوقيت UTC
+  const startUTC = `${date}T00:00:00Z`;
+  const endUTC   = `${date}T23:59:59Z`;
+
+  const { data, error } = await supabase
     .from("appointments")
-    .select("appointment_time")
-    .eq("appointment_date", date);
-  return new Set((data || []).map(r => r.appointment_time?.substring(0,5)).filter(Boolean));
+    .select("date_time")
+    .gte("date_time", startUTC)
+    .lt("date_time", endUTC);
+
+  if (error || !data) {
+    console.error("خطأ في جلب الحجوزات:", error);
+    return new Set<string>();
+  }
+
+  const booked = new Set<string>();
+
+  const timeFormatter = new Intl.DateTimeFormat("en", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  for (const row of data) {
+    if (row.date_time) {
+      const localTime = timeFormatter.format(new Date(row.date_time));
+      booked.add(localTime);
+    }
+  }
+
+  return booked;
 }
 
 function timeToMinutes(time: string): number {
