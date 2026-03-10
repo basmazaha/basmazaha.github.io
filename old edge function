@@ -36,9 +36,8 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const { date, query_type = "booked_times", days = 15 } = body ?? {};  // غيرت الافتراضي إلى 15 يوم
+    const { date, query_type = "booked_times", days = 15 } = body ?? {};
 
-    // ─── التحقق الأساسي من التاريخ (عند الحاجة) ───
     if (date && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
       return new Response(
         JSON.stringify({ error: "التاريخ غير صالح أو مفقود" }),
@@ -46,7 +45,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ─── 1. جلب الأيام المعطلة (off_days) ───
+    // 1. جلب الأيام المعطلة
     if (query_type === "off_days") {
       const { data, error } = await supabase
         .from("off_days")
@@ -69,7 +68,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ─── 2. جلب ساعات العمل لتاريخ معين (جديد – من working_hours) ───
+    // 2. ساعات العمل ليوم معين
     if (query_type === "working_hours_for_date") {
       if (!date) {
         return new Response(JSON.stringify({ error: "التاريخ مطلوب" }), {
@@ -102,7 +101,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ─── 3. جلب المواعيد المتاحة خلال الـ N يوم القادمة ───
+    // 3. المواعيد المتاحة في الـ N يوم القادمة
     if (query_type === "available_dates_next_days") {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -110,7 +109,6 @@ Deno.serve(async (req: Request) => {
       const futureDate = new Date(today);
       futureDate.setDate(today.getDate() + days);
 
-      // جلب off_days في الفترة
       const { data: offData } = await supabase
         .from("off_days")
         .select("date")
@@ -119,7 +117,6 @@ Deno.serve(async (req: Request) => {
 
       const offDaysSet = new Set(offData?.map(r => r.date) || []);
 
-      // جلب إعدادات ساعات العمل
       const { data: hoursData } = await supabase
         .from("working_hours")
         .select("day_of_week, is_open, start_time, end_time, slot_duration_minutes");
@@ -127,7 +124,6 @@ Deno.serve(async (req: Request) => {
       const hoursMap = new Map<number, any>();
       hoursData?.forEach(h => hoursMap.set(h.day_of_week, h));
 
-      // جلب الحجوزات في الفترة (لمعرفة الأيام الممتلئة)
       const { data: bookings } = await supabase
         .from("appointments")
         .select("appointment_date, appointment_time")
@@ -168,7 +164,6 @@ Deno.serve(async (req: Request) => {
         const bookedSet = bookedByDate.get(dateStr) || new Set();
         const bookedCount = bookedSet.size;
 
-        // اليوم الحالي → تحقق إضافي
         let isTodayAndPassed = false;
         if (i === 0) {
           const now = new Date();
@@ -190,7 +185,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ─── 4. جلب المواعيد المحجوزة ليوم معين (الافتراضي) ───
+    // 4. المواعيد المحجوزة ليوم معين (الافتراضي)
     if (query_type === "booked_times" || !query_type) {
       if (!date) {
         return new Response(JSON.stringify({ error: "التاريخ مطلوب لهذا الاستعلام" }), {
@@ -222,7 +217,6 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // استعلام غير مدعوم
     return new Response(JSON.stringify({ error: "نوع الاستعلام غير مدعوم" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -235,6 +229,7 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+});   // ← القوس الناقص كان هنا — تم إضافته
 
 
 
