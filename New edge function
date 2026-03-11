@@ -388,7 +388,7 @@ Deno.serve(async (req: Request) => {
     // ──────────────────────────────────────────────
     // التحقق من أن الموعد ليس في الماضي
     // ──────────────────────────────────────────────
-    if (new Date(utcDateTime) < new Date()) {
+    if (Date.parse(utcDateTime) < Date.now()) {
       return new Response(
         JSON.stringify({ error: "لا يمكن حجز موعد في الماضي" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
