@@ -1,3 +1,258 @@
+// supabase/functions/create-appointment/index.ts
+
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabase = createClient(
+  SUPABASE_URL ?? "",
+  SUPABASE_SERVICE_ROLE_KEY ?? "",
+  {
+    auth: { persistSession: false },
+    global: { headers: { "x-client-info": "create-appointment" } },
+  }
+);
+
+Deno.serve(async (req: Request) => {
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+  }
+
+  let body;
+
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(
+      JSON.stringify({ error: "Bad JSON body" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const {
+    full_name = "",
+    email = "",
+    phone = "",
+    reason = "",
+    datetime,
+    booking_id = null,
+    token = null
+  } = body;
+
+  if (!datetime) {
+    return new Response(
+      JSON.stringify({ error: "التاريخ والوقت مطلوبان" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
+    return new Response(
+      JSON.stringify({ error: "صيغة التاريخ غير صحيحة" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+
+    const tz = await getBusinessTimezone();
+
+    const utcDateTime = localToUTC(datetime, tz);
+
+    if (Date.parse(utcDateTime) < Date.now()) {
+      return new Response(
+        JSON.stringify({ error: "لا يمكن اختيار موعد في الماضي" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // التحقق من التعارض
+    const { data: conflict } = await supabase
+      .from("appointments")
+      .select("id")
+      .eq("date_time", utcDateTime)
+      .maybeSingle();
+
+    if (conflict) {
+      return new Response(
+        JSON.stringify({ error: "هذا الموعد محجوز بالفعل" }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ==============================
+    // وضع إعادة الجدولة
+    // ==============================
+
+    if (booking_id && token) {
+
+      const { data: booking } = await supabase
+        .from("appointments")
+        .select("id,status")
+        .eq("id", booking_id)
+        .eq("manage_token", token)
+        .maybeSingle();
+
+      if (!booking) {
+        return new Response(
+          JSON.stringify({ error: "رابط التعديل غير صالح" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (booking.status !== "confirmed") {
+        return new Response(
+          JSON.stringify({ error: "لا يمكن تعديل هذا الحجز" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({
+          date_time: utcDateTime
+        })
+        .eq("id", booking_id);
+
+      if (updateError) throw updateError;
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "تم تعديل الموعد بنجاح"
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ==============================
+    // حجز جديد
+    // ==============================
+
+    if (!full_name || !email || !phone) {
+      return new Response(
+        JSON.stringify({ error: "الاسم والبريد والهاتف مطلوبون" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { error } = await supabase.from("appointments").insert({
+      full_name: full_name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      reason: reason.trim(),
+      date_time: utcDateTime,
+      status: "confirmed",
+    });
+
+    if (error) throw error;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "تم الحجز بنجاح"
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (err) {
+
+    console.error(err);
+
+    return new Response(
+      JSON.stringify({ error: "حدث خطأ أثناء الحجز" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+});
+
+async function getBusinessTimezone(): Promise<string> {
+
+  const { data } = await supabase
+    .from("business_settings")
+    .select("timezone")
+    .maybeSingle();
+
+  return data?.timezone || "Africa/Cairo";
+}
+
+function localToUTC(localIso: string, ianaTz: string): string {
+
+  const localDate = new Date(localIso);
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: ianaTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(localDate);
+
+  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+
+  const y = Number(map.year);
+  const m = Number(map.month) - 1;
+  const d = Number(map.day);
+  const hh = Number(map.hour);
+  const mm = Number(map.minute);
+  const ss = Number(map.second || "00");
+
+  const localWallTime = new Date(y, m, d, hh, mm, ss);
+
+  const offsetMs = localWallTime.getTime() - localDate.getTime();
+
+  const utcTimeMs = localDate.getTime() - offsetMs;
+
+  return new Date(utcTimeMs).toISOString();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // supabase/functions/check-booked-times/index.ts
 
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
@@ -531,228 +786,3 @@ function localToUTC(localIso: string, ianaTz: string): string {
 
 
 
-supabase/functions/create-appointment/index.ts
-
-import { createClient } from "npm:@supabase/supabase-js@2.29.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-const supabase = createClient(
-  SUPABASE_URL ?? "",
-  SUPABASE_SERVICE_ROLE_KEY ?? "",
-  {
-    auth: { persistSession: false },
-    global: { headers: { "x-client-info": "create-appointment" } },
-  }
-);
-
-Deno.serve(async (req: Request) => {
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-  }
-
-  let body;
-
-  try {
-    body = await req.json();
-  } catch {
-    return new Response(
-      JSON.stringify({ error: "Bad JSON body" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  const {
-    full_name = "",
-    email = "",
-    phone = "",
-    reason = "",
-    datetime,
-    booking_id = null,
-    token = null
-  } = body;
-
-  if (!datetime) {
-    return new Response(
-      JSON.stringify({ error: "التاريخ والوقت مطلوبان" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
-    return new Response(
-      JSON.stringify({ error: "صيغة التاريخ غير صحيحة" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  try {
-
-    const tz = await getBusinessTimezone();
-
-    const utcDateTime = localToUTC(datetime, tz);
-
-    if (new Date(utcDateTime) < new Date()) {
-      return new Response(
-        JSON.stringify({ error: "لا يمكن اختيار موعد في الماضي" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // التحقق من التعارض
-    const { data: conflict } = await supabase
-      .from("appointments")
-      .select("id")
-      .eq("date_time", utcDateTime)
-      .maybeSingle();
-
-    if (conflict) {
-      return new Response(
-        JSON.stringify({ error: "هذا الموعد محجوز بالفعل" }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ==============================
-    // وضع إعادة الجدولة
-    // ==============================
-
-    if (booking_id && token) {
-
-      const { data: booking } = await supabase
-        .from("appointments")
-        .select("id,status")
-        .eq("id", booking_id)
-        .eq("manage_token", token)
-        .maybeSingle();
-
-      if (!booking) {
-        return new Response(
-          JSON.stringify({ error: "رابط التعديل غير صالح" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (booking.status !== "confirmed") {
-        return new Response(
-          JSON.stringify({ error: "لا يمكن تعديل هذا الحجز" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const { error: updateError } = await supabase
-        .from("appointments")
-        .update({
-          date_time: utcDateTime
-        })
-        .eq("id", booking_id);
-
-      if (updateError) throw updateError;
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: "تم تعديل الموعد بنجاح"
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ==============================
-    // حجز جديد
-    // ==============================
-
-    if (!full_name || !email || !phone) {
-      return new Response(
-        JSON.stringify({ error: "الاسم والبريد والهاتف مطلوبون" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const { error } = await supabase.from("appointments").insert({
-      full_name: full_name.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      reason: reason.trim(),
-      date_time: utcDateTime,
-      status: "confirmed",
-    });
-
-    if (error) throw error;
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: "تم الحجز بنجاح"
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-
-  } catch (err) {
-
-    console.error(err);
-
-    return new Response(
-      JSON.stringify({ error: "حدث خطأ أثناء الحجز" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-});
-
-async function getBusinessTimezone(): Promise<string> {
-
-  const { data } = await supabase
-    .from("business_settings")
-    .select("timezone")
-    .maybeSingle();
-
-  return data?.timezone || "Africa/Cairo";
-}
-
-function localToUTC(localIso: string, ianaTz: string): string {
-
-  const localDate = new Date(localIso);
-
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: ianaTz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-
-  const parts = formatter.formatToParts(localDate);
-
-  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
-
-  const y = Number(map.year);
-  const m = Number(map.month) - 1;
-  const d = Number(map.day);
-  const hh = Number(map.hour);
-  const mm = Number(map.minute);
-  const ss = Number(map.second || "00");
-
-  const localWallTime = new Date(y, m, d, hh, mm, ss);
-
-  const offsetMs = localWallTime.getTime() - localDate.getTime();
-
-  const utcTimeMs = localDate.getTime() - offsetMs;
-
-  return new Date(utcTimeMs).toISOString();
-}
