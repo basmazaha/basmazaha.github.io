@@ -991,3 +991,258 @@ Manage Booking
   );
 
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ────────────────────────────────────────────────────────────────
+// Edge Function: send-appointment-reminders
+// إرسال تذكير قبل ≤ 6 ساعات من الموعد (وليس في نافذة 6-7 ساعات فقط)
+// cron يعمل كل ساعة
+// date_time مخزن UTC
+// ────────────────────────────────────────────────────────────────
+
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const APP_BASE_URL =
+  (Deno.env.get("APP_BASE_URL") || "https://new-91v.pages.dev/").replace(/\/+$/, "");
+
+if (!BREVO_API_KEY) {
+  console.error("BREVO_API_KEY missing");
+
+  Deno.serve(() =>
+    new Response(
+      JSON.stringify({ error: "Server misconfiguration" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    )
+  );
+}
+
+Deno.serve(async (req: Request) => {
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+  const { DateTime } = await import("https://esm.sh/luxon");
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  // ─────────────────────────────────────────
+  // جلب timezone الخاص بالعيادة
+  // ─────────────────────────────────────────
+
+  const { data: settings } = await supabase
+    .from("business_settings")
+    .select("timezone")
+    .single();
+
+  const BUSINESS_TZ = settings?.timezone || "Africa/Cairo";
+
+  // ─────────────────────────────────────────
+  // حساب نافذة التذكير الجديدة:
+  // المواعيد من الآن وحتى بعد 6 ساعات بالضبط
+  // ─────────────────────────────────────────
+
+  const nowUTC = DateTime.utc();
+  const reminderUntil = nowUTC.plus({ hours: 6 });
+
+  // للتصحيح (يمكنك إزالتها لاحقاً)
+  console.log({
+    now_UTC: nowUTC.toISO(),
+    send_reminder_for_appointments_until: reminderUntil.toISO(),
+  });
+
+  // ─────────────────────────────────────────
+  // جلب وحجز المواعيد التي يجب إرسال تذكير لها الآن
+  // ─────────────────────────────────────────
+
+  const { data: appointments, error } = await supabase
+    .from("appointments")
+    .update({ reminder_sent_6h: true })
+    .eq("reminder_sent_6h", false)
+    .not("email", "is", null)
+    .in("status", ["confirmed", "rescheduled"])
+    .gte("date_time", nowUTC.toISO())               // الموعد لم يبدأ بعد
+    .lte("date_time", reminderUntil.toISO())        // الموعد خلال ≤ 6 ساعات
+    .select(`
+      id,
+      full_name,
+      email,
+      date_time,
+      reason,
+      manage_token
+    `);
+
+  if (error) {
+    console.error("Database error:", error);
+
+    return new Response(
+      JSON.stringify({ error: "Database error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  if (!appointments || appointments.length === 0) {
+    return new Response(
+      JSON.stringify({ message: "No reminders to send" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const failedIds: string[] = [];
+  let sentCount = 0;
+
+  // ─────────────────────────────────────────
+  // إرسال التذكيرات لكل موعد
+  // ─────────────────────────────────────────
+
+  for (const ap of appointments) {
+
+    try {
+
+      const localDate = DateTime
+        .fromISO(ap.date_time, { zone: "utc" })
+        .setZone(BUSINESS_TZ);
+
+      const formattedDateAr = localDate
+        .setLocale("ar-EG")
+        .toLocaleString(DateTime.DATE_FULL);
+
+      const formattedTimeAr = localDate
+        .setLocale("ar-EG")
+        .toFormat("hh:mm a");
+
+      const formattedTimeEn = localDate
+        .setLocale("en-US")
+        .toFormat("hh:mm a");
+
+      const manageLinkAr = `\( {APP_BASE_URL}/manage/ \){ap.manage_token}`;
+      const manageLinkEn = `\( {APP_BASE_URL}/en/manage/ \){ap.manage_token}`;
+
+      const htmlContent = `
+<div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 620px; margin: auto; padding: 24px; border:1px solid #e0e0e0; border-radius:8px">
+
+<h2 style="text-align:center;color:#1a3c5e">تذكير بموعدك القادم</h2>
+
+<p>مرحباً ${ap.full_name || "السيد/السيدة"}،</p>
+
+<p>هذا تذكير بموعدك القادم في عيادة دكتور عمرو.</p>
+
+<table style="width:100%;margin-top:20px">
+<tr><td><b>الاسم</b></td><td>${ap.full_name || "-"}</td></tr>
+<tr><td><b>التاريخ</b></td><td>${formattedDateAr}</td></tr>
+<tr><td><b>الوقت</b></td><td>${formattedTimeAr}</td></tr>
+<tr><td><b>السبب</b></td><td>${ap.reason || "-"}</td></tr>
+</table>
+
+<div style="text-align:center;margin-top:30px">
+<a href="${manageLinkAr}" style="padding:12px 28px;background:#3b82f6;color:white;text-decoration:none;border-radius:6px">
+إدارة الحجز
+</a>
+</div>
+
+<hr style="margin:40px 0">
+
+<div dir="ltr">
+
+<h2>Appointment Reminder</h2>
+
+<p>Hello ${ap.full_name || "Dear Patient"},</p>
+
+<p>This is a reminder of your upcoming appointment.</p>
+
+<table style="width:100%">
+<tr><td><b>Name</b></td><td>${ap.full_name || "-"}</td></tr>
+<tr><td><b>Date</b></td><td>${localDate.toISODate()}</td></tr>
+<tr><td><b>Time</b></td><td>${formattedTimeEn}</td></tr>
+<tr><td><b>Reason</b></td><td>${ap.reason || "-"}</td></tr>
+</table>
+
+<div style="text-align:center;margin-top:30px">
+<a href="${manageLinkEn}" style="padding:12px 28px;background:#3b82f6;color:white;text-decoration:none;border-radius:6px">
+Manage Booking
+</a>
+</div>
+
+</div>
+</div>
+`;
+
+      const payload = {
+        sender: {
+          name: "عيادة د. عمرو",
+          email: "info@dramrclinic.online"
+        },
+        to: [{
+          email: ap.email,
+          name: ap.full_name || "Patient"
+        }],
+        subject: "تذكير بموعدك | Appointment Reminder",
+        htmlContent
+      };
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const err = await response.text().catch(() => "");
+        console.error(`Brevo error for appointment ${ap.id}:`, err);
+        failedIds.push(ap.id);
+        continue;
+      }
+
+      sentCount++;
+
+    } catch (err) {
+      console.error(`Processing error for appointment ${ap.id}:`, err);
+      failedIds.push(ap.id);
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // إرجاع النتيجة النهائية
+  // ─────────────────────────────────────────
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      processed: appointments.length,
+      sent: sentCount,
+      failed: failedIds.length,
+      failed_ids: failedIds
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }
+  );
+
+});
