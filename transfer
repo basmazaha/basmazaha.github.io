@@ -1,533 +1,3 @@
-// supabase/functions/check-booked-times/index.ts
-
-import { createClient } from "npm:@supabase/supabase-js@2.29.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "", {
-  auth: { persistSession: false },
-});
-
-Deno.serve(async (req: Request) => {
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-  }
-
-  const body = await req.json();
-  const { query_type, date, days = 15 } = body ?? {};
-
-  try {
-
-    // ─────────────────────────────────────
-    // جلب timezone مرة واحدة فقط
-    // ─────────────────────────────────────
-    const timezone = await getBusinessTimezone();
-
-    // ─────────────────────────────────────
-    // 1️⃣ الأيام المتاحة
-    // ─────────────────────────────────────
-    if (query_type === "available_dates_next_days") {
-
-      const today = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
-
-      const todayStr = formatter.format(today);
-
-      const { data: offDays } = await supabase
-        .from("off_days")
-        .select("date")
-        .gte("date", todayStr);
-
-      const offSet = new Set(offDays?.map(d => d.date) || []);
-
-      const { data: working } = await supabase
-        .from("working_hours")
-        .select("day_of_week, is_open");
-
-      const workingMap = new Map(
-        (working || []).map(w => [w.day_of_week, w.is_open])
-      );
-
-      const available: string[] = [];
-
-      for (let i = 0; i < days; i++) {
-
-        const d = new Date(todayStr);
-        d.setDate(d.getDate() + i);
-
-        const dateStr = d.toISOString().split("T")[0];
-
-        if (offSet.has(dateStr)) continue;
-
-        const dow = await getDayOfWeekInBusinessTimezone(dateStr, timezone);
-
-        if (workingMap.get(dow)) {
-          available.push(dateStr);
-        }
-      }
-
-      return json({ available_dates: available });
-    }
-
-    // ─────────────────────────────────────
-    // 2️⃣ الأوقات المتاحة ليوم
-    // ─────────────────────────────────────
-    if (query_type === "available_times_for_date") {
-
-      if (!date) return json({ available_times: [] });
-
-      const dow = await getDayOfWeekInBusinessTimezone(date, timezone);
-
-      const { data: config } = await supabase
-        .from("working_hours")
-        .select("*")
-        .eq("day_of_week", dow)
-        .maybeSingle();
-
-      if (!config || !config.is_open) {
-        return json({ available_times: [] });
-      }
-
-      const booked = await getBookedTimes(date, timezone);
-
-      const startMin = timeToMinutes(config.start_time);
-      const endMin = timeToMinutes(config.end_time);
-
-      const slot = config.slot_duration_minutes || 15;
-
-      const breakStart = config.break_start ? timeToMinutes(config.break_start) : null;
-      const breakEnd = config.break_end ? timeToMinutes(config.break_end) : null;
-
-      const available: string[] = [];
-
-      for (let m = startMin; m < endMin; m += slot) {
-
-        const h = Math.floor(m / 60);
-        const min = m % 60;
-
-        const t = `${h.toString().padStart(2,"0")}:${min.toString().padStart(2,"0")}`;
-
-        if (booked.has(t)) continue;
-
-        if (breakStart !== null && breakEnd !== null) {
-          if (m >= breakStart && m < breakEnd) continue;
-        }
-
-        available.push(t);
-      }
-
-      return json({ available_times: available });
-    }
-
-    return json({ error: "Invalid query type" }, 400);
-
-  } catch (err) {
-
-    console.error(err);
-
-    return json({ error: "Internal server error" }, 500);
-
-  }
-
-});
-
-
-// ─────────────────────────────────────────
-// جلب الأوقات المحجوزة (مع تجاهل cancelled)
-// ─────────────────────────────────────────
-
-async function getBookedTimes(date: string, timezone: string): Promise<Set<string>> {
-
-  const startUTC = `${date}T00:00:00Z`;
-
-  // تحسين آخر دقيقة في اليوم
-  const endUTC = `${date}T23:59:59.999Z`;
-
-  const { data } = await supabase
-    .from("appointments")
-    .select("date_time")
-    .neq("status", "cancelled") // استثناء الملغية فقط
-    .gte("date_time", startUTC)
-    .lt("date_time", endUTC);
-
-  const booked = new Set<string>();
-
-  const formatter = new Intl.DateTimeFormat("en", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
-
-  for (const row of data || []) {
-
-    const localTime = formatter.format(new Date(row.date_time));
-
-    booked.add(localTime);
-
-  }
-
-  return booked;
-}
-
-
-// ─────────────────────────────────────────
-
-async function getBusinessTimezone(): Promise<string> {
-
-  const { data } = await supabase
-    .from("business_settings")
-    .select("timezone")
-    .maybeSingle();
-
-  return data?.timezone || "Africa/Cairo";
-
-}
-
-
-// ─────────────────────────────────────────
-
-async function getDayOfWeekInBusinessTimezone(dateStr: string, tz: string): Promise<number> {
-
-  const date = new Date(`${dateStr}T12:00:00`);
-
-  const dayShort = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "short"
-  }).format(date);
-
-  const map: Record<string, number> = {
-    Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6
-  };
-
-  return map[dayShort] ?? 0;
-
-}
-
-
-// ─────────────────────────────────────────
-
-function timeToMinutes(time: string): number {
-
-  const [h,m] = time.split(":").map(Number);
-
-  return h*60 + m;
-
-}
-
-
-// ─────────────────────────────────────────
-
-function json(data:any, status=200){
-
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers:{
-        ...corsHeaders,
-        "Content-Type":"application/json"
-      }
-    }
-  );
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// supabase/functions/create-appointment/index.ts
-
-import { createClient } from "npm:@supabase/supabase-js@2.29.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-const supabase = createClient(
-  SUPABASE_URL ?? "",
-  SUPABASE_SERVICE_ROLE_KEY ?? "",
-  { auth: { persistSession: false } }
-);
-
-Deno.serve(async (req: Request) => {
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-  }
-
-  let body;
-
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: "Bad JSON body" }, 400);
-  }
-
-  const {
-    full_name = "",
-    email = "",
-    phone = "",
-    reason = "",
-    datetime,
-    booking_id = null,
-    token = null
-  } = body;
-
-  if (!datetime) {
-    return json({ error: "التاريخ والوقت مطلوبان" }, 400);
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
-    return json({ error: "صيغة التاريخ غير صحيحة" }, 400);
-  }
-
-  try {
-
-    // ─────────────────────────────
-    // جلب timezone مرة واحدة
-    // ─────────────────────────────
-    const tz = await getBusinessTimezone();
-
-    const utcDateTime = localToUTC(datetime, tz);
-
-    if (Date.parse(utcDateTime) < Date.now()) {
-      return json({ error: "لا يمكن اختيار موعد في الماضي" }, 400);
-    }
-
-    // ─────────────────────────────
-    // التحقق من التعارض
-    // تجاهل cancelled
-    // ─────────────────────────────
-
-    const { data: conflict } = await supabase
-      .from("appointments")
-      .select("id")
-      .eq("date_time", utcDateTime)
-      .neq("status", "cancelled")
-      .maybeSingle();
-
-    if (conflict) {
-      return json({ error: "هذا الموعد محجوز بالفعل" }, 409);
-    }
-
-    // ─────────────────────────────
-    // إعادة الجدولة
-    // ─────────────────────────────
-
-    if (booking_id && token) {
-
-      const { data: booking } = await supabase
-        .from("appointments")
-        .select("id,status")
-        .eq("id", booking_id)
-        .eq("manage_token", token)
-        .maybeSingle();
-
-      if (!booking) {
-        return json({ error: "رابط التعديل غير صالح" }, 403);
-      }
-
-      if (booking.status !== "confirmed") {
-        return json({ error: "لا يمكن تعديل هذا الحجز" }, 400);
-      }
-
-      const { error } = await supabase
-        .from("appointments")
-        .update({
-          date_time: utcDateTime
-        })
-        .eq("id", booking_id);
-
-      if (error) throw error;
-
-      return json({
-        success: true,
-        message: "تم تعديل الموعد بنجاح"
-      });
-    }
-
-    // ─────────────────────────────
-    // حجز جديد
-    // ─────────────────────────────
-
-    if (!full_name || !email || !phone) {
-      return json({ error: "الاسم والبريد والهاتف مطلوبون" }, 400);
-    }
-
-    const { error } = await supabase
-      .from("appointments")
-      .insert({
-        full_name: full_name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        reason: reason.trim(),
-        date_time: utcDateTime,
-        status: "confirmed"
-      });
-
-    if (error) throw error;
-
-    return json({
-      success: true,
-      message: "تم الحجز بنجاح"
-    });
-
-  } catch (err) {
-
-    console.error(err);
-
-    return json({ error: "حدث خطأ أثناء الحجز" }, 500);
-  }
-
-});
-
-
-// ─────────────────────────────────────
-
-async function getBusinessTimezone(): Promise<string> {
-
-  const { data } = await supabase
-    .from("business_settings")
-    .select("timezone")
-    .maybeSingle();
-
-  return data?.timezone || "Africa/Cairo";
-}
-
-
-// ─────────────────────────────────────
-
-function localToUTC(localIso: string, ianaTz: string): string {
-
-  const localDate = new Date(localIso);
-
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: ianaTz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-
-  const parts = formatter.formatToParts(localDate);
-  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
-
-  const y = Number(map.year);
-  const m = Number(map.month) - 1;
-  const d = Number(map.day);
-  const hh = Number(map.hour);
-  const mm = Number(map.minute);
-  const ss = Number(map.second || "00");
-
-  const localWallTime = new Date(y, m, d, hh, mm, ss);
-
-  const offsetMs = localWallTime.getTime() - localDate.getTime();
-
-  const utcTimeMs = localDate.getTime() - offsetMs;
-
-  return new Date(utcTimeMs).toISOString();
-}
-
-
-// ─────────────────────────────────────
-
-function json(data:any, status=200){
-
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers:{
-        ...corsHeaders,
-        "Content-Type":"application/json"
-      }
-    }
-  );
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // supabase/functions/create-appointment/index.ts
 
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
@@ -579,7 +49,6 @@ Deno.serve(async (req) => {
 
   try {
 
-    // جلب timezone
     const { data: settings } = await supabase
       .from("business_settings")
       .select("timezone")
@@ -598,14 +67,16 @@ Deno.serve(async (req) => {
 
     if (booking_id && token) {
 
-      const { data, error } = await supabase
+      const { error, count } = await supabase
         .from("appointments")
-        .update({ date_time: utcDateTime })
+        .update({
+          date_time: utcDateTime,
+          status: "rescheduled"
+        })
         .eq("id", booking_id)
         .eq("manage_token", token)
         .eq("status", "confirmed")
-        .select()
-        .maybeSingle();
+        .select("*", { count: "exact", head: true });
 
       if (error) {
 
@@ -615,7 +86,7 @@ Deno.serve(async (req) => {
         throw error;
       }
 
-      if (!data)
+      if (!count)
         return json({ error: "لا يمكن تعديل هذا الحجز" }, 403);
 
       return json({
@@ -631,7 +102,9 @@ Deno.serve(async (req) => {
     if (!full_name || !email || !phone)
       return json({ error: "الاسم والبريد والهاتف مطلوبون" }, 400);
 
-    const { error } = await supabase
+    const manage_token = crypto.randomUUID();
+
+    const { data: inserted, error } = await supabase
       .from("appointments")
       .insert({
         full_name: full_name.trim(),
@@ -639,8 +112,11 @@ Deno.serve(async (req) => {
         phone: phone.trim(),
         reason: reason.trim(),
         date_time: utcDateTime,
+        manage_token,
         status: "confirmed"
-      });
+      })
+      .select("id, full_name, email, date_time, reason, manage_token")
+      .single();
 
     if (error) {
 
@@ -649,6 +125,14 @@ Deno.serve(async (req) => {
 
       throw error;
     }
+
+    // ارسال الايميل
+    supabase.functions.invoke(
+      "send-booking-confirmation-brevo",
+      {
+        body: inserted
+      }
+    ).catch(console.error);
 
     return json({
       success: true,
@@ -697,15 +181,164 @@ function localToUTC(localIso: string, tz: string) {
 }
 
 function json(data:any,status=200){
-
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers:{
-        ...corsHeaders,
-        "Content-Type":"application/json"
-      }
+  return new Response(JSON.stringify(data),{
+    status,
+    headers:{
+      ...corsHeaders,
+      "Content-Type":"application/json"
     }
-  );
+  });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// supabase/functions/send-booking-confirmation-brevo/index.ts
+
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const APP_BASE_URL = (Deno.env.get("APP_BASE_URL") || "https://new-91v.pages.dev").replace(/\/+$/, "");
+
+Deno.serve(async (req: Request) => {
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405 });
+  }
+
+  const {
+    id,
+    full_name,
+    email,
+    date_time,
+    reason,
+    manage_token
+  } = await req.json();
+
+  if (!email || !id || !date_time) {
+    return new Response(JSON.stringify({ error: "بيانات ناقصة" }), { status: 400 });
+  }
+
+  const dateObj = new Date(date_time);
+
+  const dateAr = dateObj.toLocaleDateString("ar-EG", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const timeAr = dateObj.toLocaleTimeString("ar-EG", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const dateEn = dateObj.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const timeEn = dateObj.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const manageLinkAr = `${APP_BASE_URL}/manage/${manage_token}`;
+  const manageLinkEn = `${APP_BASE_URL}/en/manage/${manage_token}`;
+
+  const htmlContent = `
+  <div dir="rtl" style="font-family:Tahoma;padding:30px">
+
+  <h2>تأكيد حجز موعدك</h2>
+
+  <p>مرحباً ${full_name}</p>
+
+  <p>
+  تم تأكيد حجزك بتاريخ<br>
+  <strong>${dateAr}</strong><br>
+  الساعة <strong>${timeAr}</strong>
+  </p>
+
+  <p>
+  يمكنك إدارة الحجز من هنا
+  </p>
+
+  <a href="${manageLinkAr}">
+  إدارة الحجز
+  </a>
+
+  <hr>
+
+  <div dir="ltr">
+
+  <h2>Appointment Confirmation</h2>
+
+  <p>Hello ${full_name}</p>
+
+  <p>
+  Your appointment is confirmed for<br>
+  <strong>${dateEn}</strong><br>
+  at <strong>${timeEn}</strong>
+  </p>
+
+  <a href="${manageLinkEn}">
+  Manage Booking
+  </a>
+
+  </div>
+  </div>
+  `;
+
+  const payload = {
+    sender: {
+      name: "عيادة د. عمرو",
+      email: "info@dramrclinic.online",
+    },
+    to: [{ email, name: full_name }],
+    subject: "تأكيد الحجز - Booking Confirmation",
+    htmlContent,
+  };
+
+  const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "api-key": BREVO_API_KEY!,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    console.error(txt);
+    return new Response(JSON.stringify({ error: "Brevo error" }), { status: 500 });
+  }
+
+  return new Response(JSON.stringify({ success: true }), { status: 200 });
+});
