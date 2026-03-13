@@ -533,6 +533,8 @@ Deno.serve(async (req: Request) => {
       manage_token
     `)
     .eq("reminder_sent_6h", false)
+    .not("email", "is", null)
+    .in("status", ["confirmed", "rescheduled"])
     .gte("date_time", startWindow.toISO())
     .lt("date_time", endWindow.toISO())
     .order("date_time", { ascending: true });
