@@ -504,3 +504,208 @@ function json(data:any, status=200){
   );
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// supabase/functions/create-appointment/index.ts
+
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL") ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  { auth: { persistSession: false } }
+);
+
+Deno.serve(async (req) => {
+
+  if (req.method === "OPTIONS")
+    return new Response(null, { headers: corsHeaders });
+
+  if (req.method !== "POST")
+    return json({ error: "Method not allowed" }, 405);
+
+  let body;
+
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Bad JSON body" }, 400);
+  }
+
+  const {
+    full_name = "",
+    email = "",
+    phone = "",
+    reason = "",
+    datetime,
+    booking_id = null,
+    token = null
+  } = body;
+
+  if (!datetime)
+    return json({ error: "التاريخ والوقت مطلوبان" }, 400);
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime))
+    return json({ error: "صيغة التاريخ غير صحيحة" }, 400);
+
+  try {
+
+    // جلب timezone
+    const { data: settings } = await supabase
+      .from("business_settings")
+      .select("timezone")
+      .maybeSingle();
+
+    const tz = settings?.timezone || "Africa/Cairo";
+
+    const utcDateTime = localToUTC(datetime, tz);
+
+    if (Date.parse(utcDateTime) < Date.now())
+      return json({ error: "لا يمكن اختيار موعد في الماضي" }, 400);
+
+    // ======================
+    // إعادة الجدولة
+    // ======================
+
+    if (booking_id && token) {
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .update({ date_time: utcDateTime })
+        .eq("id", booking_id)
+        .eq("manage_token", token)
+        .eq("status", "confirmed")
+        .select()
+        .maybeSingle();
+
+      if (error) {
+
+        if (error.message.includes("unique"))
+          return json({ error: "هذا الموعد محجوز بالفعل" }, 409);
+
+        throw error;
+      }
+
+      if (!data)
+        return json({ error: "لا يمكن تعديل هذا الحجز" }, 403);
+
+      return json({
+        success: true,
+        message: "تم تعديل الموعد بنجاح"
+      });
+    }
+
+    // ======================
+    // حجز جديد
+    // ======================
+
+    if (!full_name || !email || !phone)
+      return json({ error: "الاسم والبريد والهاتف مطلوبون" }, 400);
+
+    const { error } = await supabase
+      .from("appointments")
+      .insert({
+        full_name: full_name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        reason: reason.trim(),
+        date_time: utcDateTime,
+        status: "confirmed"
+      });
+
+    if (error) {
+
+      if (error.message.includes("unique"))
+        return json({ error: "هذا الموعد محجوز بالفعل" }, 409);
+
+      throw error;
+    }
+
+    return json({
+      success: true,
+      message: "تم الحجز بنجاح"
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return json({ error: "حدث خطأ أثناء الحجز" }, 500);
+  }
+
+});
+
+function localToUTC(localIso: string, tz: string) {
+
+  const localDate = new Date(localIso);
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(localDate);
+  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+
+  const y = Number(map.year);
+  const m = Number(map.month) - 1;
+  const d = Number(map.day);
+  const hh = Number(map.hour);
+  const mm = Number(map.minute);
+  const ss = Number(map.second || "00");
+
+  const localWall = new Date(y, m, d, hh, mm, ss);
+
+  const offset = localWall.getTime() - localDate.getTime();
+
+  return new Date(localDate.getTime() - offset).toISOString();
+}
+
+function json(data:any,status=200){
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers:{
+        ...corsHeaders,
+        "Content-Type":"application/json"
+      }
+    }
+  );
+}
