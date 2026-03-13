@@ -15,13 +15,18 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+// cache timezone لتقليل الاستعلامات
+let cachedTimezone: string | null = null;
+
 Deno.serve(async (req) => {
 
-  if (req.method === "OPTIONS")
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
 
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
+  }
 
   let body;
 
@@ -44,24 +49,41 @@ Deno.serve(async (req) => {
 
   try {
 
-    const { data: settings } = await supabase
-      .from("business_settings")
-      .select("timezone")
-      .maybeSingle();
+    // ======================
+    // get timezone (with cache)
+    // ======================
 
-    const tz = settings?.timezone || "Africa/Cairo";
+    let tz = cachedTimezone;
+
+    if (!tz) {
+      const { data: settings } = await supabase
+        .from("business_settings")
+        .select("timezone")
+        .maybeSingle();
+
+      tz = settings?.timezone || "Africa/Cairo";
+      cachedTimezone = tz;
+    }
 
     let utcDateTime: string | null = null;
 
     if (datetime) {
 
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime))
-        return json({ error: "Invalid date format / صيغة التاريخ غير صحيحة" }, 400);
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(datetime)) {
+        return json(
+          { error: "Invalid date format / صيغة التاريخ غير صحيحة" },
+          400
+        );
+      }
 
       utcDateTime = localToUTC(datetime, tz);
 
-      if (Date.parse(utcDateTime) < Date.now())
-        return json({ error: "Past time not allowed / لا يمكن اختيار موعد في الماضي" }, 400);
+      if (Date.parse(utcDateTime) < Date.now()) {
+        return json(
+          { error: "Past time not allowed / لا يمكن اختيار موعد في الماضي" },
+          400
+        );
+      }
     }
 
     // ======================
@@ -82,12 +104,15 @@ Deno.serve(async (req) => {
         .in("status", ["confirmed", "rescheduled"])
         .select("*", { count: "exact", head: true });
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
-      if (!count)
+      if (count === 0) {
         return json({
           error: "Cannot cancel appointment / لا يمكن إلغاء هذا الحجز"
         }, 403);
+      }
 
       return json({
         success: true,
@@ -96,7 +121,7 @@ Deno.serve(async (req) => {
     }
 
     // ======================
-    // Reschedule (مرة واحدة فقط)
+    // Reschedule
     // ======================
 
     if (booking_id && token && utcDateTime) {
@@ -115,18 +140,20 @@ Deno.serve(async (req) => {
 
       if (error) {
 
-        if (error.message.includes("unique"))
+        if (error.message.includes("unique")) {
           return json({
             error: "Time slot already booked / هذا الموعد محجوز بالفعل"
           }, 409);
+        }
 
         throw error;
       }
 
-      if (!count)
+      if (count === 0) {
         return json({
           error: "Cannot reschedule appointment / لا يمكن تعديل هذا الحجز"
         }, 403);
+      }
 
       return json({
         success: true,
@@ -138,10 +165,12 @@ Deno.serve(async (req) => {
     // New booking
     // ======================
 
-    if (!full_name || !email || !phone || !utcDateTime)
+    if (!full_name || !email || !phone || !utcDateTime) {
+
       return json({
         error: "Missing required fields / البيانات المطلوبة غير مكتملة"
       }, 400);
+    }
 
     const manage_token = crypto.randomUUID();
 
@@ -153,7 +182,7 @@ Deno.serve(async (req) => {
         phone: phone.trim(),
         reason: reason.trim(),
         date_time: utcDateTime,
-        manage_token,
+        manage_token: manage_token,
         status: "confirmed",
         reminder_sent_6h: false
       })
@@ -162,25 +191,25 @@ Deno.serve(async (req) => {
 
     if (error) {
 
-      if (error.message.includes("unique"))
+      if (error.message.includes("unique")) {
         return json({
           error: "Time slot already booked / هذا الموعد محجوز بالفعل"
         }, 409);
+      }
 
       throw error;
     }
 
-    supabase.functions.invoke(
-      "send-booking-confirmation-brevo",
-      {
+    supabase.functions
+      .invoke("send-booking-confirmation-brevo", {
         body: {
           id: inserted.id,
           full_name: inserted.full_name,
           email: inserted.email,
           manage_token: inserted.manage_token
         }
-      }
-    ).catch(console.error);
+      })
+      .catch(console.error);
 
     return json({
       success: true,
@@ -230,16 +259,16 @@ function localToUTC(localIso: string, tz: string) {
   return new Date(localDate.getTime() - offset).toISOString();
 }
 
-function json(data:any,status=200){
-  return new Response(JSON.stringify(data),{
+function json(data: any, status = 200) {
+
+  return new Response(JSON.stringify(data), {
     status,
-    headers:{
+    headers: {
       ...corsHeaders,
-      "Content-Type":"application/json"
+      "Content-Type": "application/json"
     }
   });
 }
-
 
 
 
