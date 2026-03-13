@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
         manage_token,
         status: "confirmed"
       })
-      .select("id, full_name, email, date_time, reason, manage_token")
+      .select("id, full_name, email, manage_token")
       .single();
 
     if (error) {
@@ -126,11 +126,19 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    // ارسال الايميل
+    // ======================
+    // إرسال الإيميل
+    // ======================
+
     supabase.functions.invoke(
       "send-booking-confirmation-brevo",
       {
-        body: inserted
+        body: {
+          id: inserted.id,
+          full_name: inserted.full_name,
+          email: inserted.email,
+          manage_token: inserted.manage_token
+        }
       }
     ).catch(console.error);
 
@@ -221,124 +229,164 @@ function json(data:any,status=200){
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const APP_BASE_URL = (Deno.env.get("APP_BASE_URL") || "https://new-91v.pages.dev").replace(/\/+$/, "");
 
+if (!BREVO_API_KEY) {
+  console.error("Missing BREVO_API_KEY env var");
+
+  Deno.serve(() =>
+    new Response(
+      JSON.stringify({ error: "Server misconfiguration: missing BREVO_API_KEY" }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    )
+  );
+
+} else {
+
 Deno.serve(async (req: Request) => {
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405 });
+    return new Response(
+      JSON.stringify({ error: "Method Not Allowed" }),
+      { status: 405, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  let body: any;
+
+  try {
+    body = await req.json();
+  } catch (err) {
+    console.error("Invalid JSON body:", err);
+
+    return new Response(
+      JSON.stringify({ error: "Invalid JSON body" }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    );
   }
 
   const {
     id,
     full_name,
     email,
-    date_time,
-    reason,
     manage_token
-  } = await req.json();
+  } = body ?? {};
 
-  if (!email || !id || !date_time) {
-    return new Response(JSON.stringify({ error: "بيانات ناقصة" }), { status: 400 });
+  if (!email || !id) {
+    return new Response(
+      JSON.stringify({ error: "حقول مطلوبة ناقصة (email أو id)" }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    );
   }
-
-  const dateObj = new Date(date_time);
-
-  const dateAr = dateObj.toLocaleDateString("ar-EG", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const timeAr = dateObj.toLocaleTimeString("ar-EG", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
-  const dateEn = dateObj.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const timeEn = dateObj.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
 
   const manageLinkAr = `${APP_BASE_URL}/manage/${manage_token}`;
   const manageLinkEn = `${APP_BASE_URL}/en/manage/${manage_token}`;
 
   const htmlContent = `
-  <div dir="rtl" style="font-family:Tahoma;padding:30px">
+      <div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px;">
+        <!-- Arabic Section -->
+        <h2 style="color: #1e40af; margin: 0 0 28px; text-align: center; font-size: 1.8rem;">
+          تأكيد حجز موعدك
+        </h2>
 
-  <h2>تأكيد حجز موعدك</h2>
+        <p style="font-size: 17px; color: #111827; line-height: 1.7; margin: 0 0 24px;">
+          مرحباً ${full_name || "السيد/السيدة"}،
+        </p>
 
-  <p>مرحباً ${full_name}</p>
+        <p style="font-size: 16px; color: #374151; line-height: 1.7; margin: 0 0 32px;">
+          لقد تلقينا تفاصيل الحجز الخاص بك .<br>
+          يمكنك الاطلاع على تفاصيل موعدك وإدارة حجزك (إلغاء أو إعادة جدولة) من خلال الرابط التالي:
+        </p>
 
-  <p>
-  تم تأكيد حجزك بتاريخ<br>
-  <strong>${dateAr}</strong><br>
-  الساعة <strong>${timeAr}</strong>
-  </p>
+        <div style="text-align: center; margin: 40px 0;">
+          <a href="${manageLinkAr}"
+             style="display: inline-block; padding: 16px 48px; background: #3b82f6; color: white; text-decoration: none; border-radius: 10px; font-size: 1.15rem; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+            إدارة حجزي الآن
+          </a>
+        </div>
 
-  <p>
-  يمكنك إدارة الحجز من هنا
-  </p>
+        <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 48px; line-height: 1.6;">
+          إذا لم تقم أنت بحجز هذا الموعد، يرجى تجاهل هذه الرسالة.<br>
+          شكراً لثقتك بعيادة د. عمرو.
+        </p>
 
-  <a href="${manageLinkAr}">
-  إدارة الحجز
-  </a>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 40px 0;">
 
-  <hr>
+        <div dir="ltr">
+          <h2 style="color: #1e40af; margin: 0 0 28px; text-align: center; font-size: 1.8rem;">
+            Appointment Confirmation
+          </h2>
 
-  <div dir="ltr">
+          <p style="font-size: 17px; color: #111827; line-height: 1.7; margin: 0 0 24px;">
+            Hello ${full_name || "Dear Patient"},
+          </p>
 
-  <h2>Appointment Confirmation</h2>
+          <p style="font-size: 16px; color: #374151; line-height: 1.7; margin: 0 0 32px;">
+            We have successfully received your appointment details.<br>
+            You can view your appointment information and manage your booking (cancel or reschedule) using the link below:
+          </p>
 
-  <p>Hello ${full_name}</p>
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="${manageLinkEn}"
+               style="display: inline-block; padding: 16px 48px; background: #3b82f6; color: white; text-decoration: none; border-radius: 10px; font-size: 1.15rem; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+              Manage Booking
+            </a>
+          </div>
 
-  <p>
-  Your appointment is confirmed for<br>
-  <strong>${dateEn}</strong><br>
-  at <strong>${timeEn}</strong>
-  </p>
-
-  <a href="${manageLinkEn}">
-  Manage Booking
-  </a>
-
-  </div>
-  </div>
-  `;
+          <p style="font-size: 14px; color: #6b7280; text-align: center; margin-top: 48px; line-height: 1.6;">
+            If you did not book this appointment, please ignore this message.<br>
+            Thank you for choosing Dr. Amr Clinic.
+          </p>
+        </div>
+      </div>
+    `;
 
   const payload = {
     sender: {
       name: "عيادة د. عمرو",
       email: "info@dramrclinic.online",
     },
-    to: [{ email, name: full_name }],
+    to: [{ email, name: full_name || "العميل" }],
     subject: "تأكيد الحجز - Booking Confirmation",
     htmlContent,
   };
 
-  const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "api-key": BREVO_API_KEY!,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  try {
 
-  if (!resp.ok) {
-    const txt = await resp.text();
-    console.error(txt);
-    return new Response(JSON.stringify({ error: "Brevo error" }), { status: 500 });
+    const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+
+      const result = await resp.json().catch(() => null);
+
+      console.error("Brevo API error:", result || { status: resp.status });
+
+      return new Response(
+        JSON.stringify({ error: result?.message || `Brevo error ${resp.status}` }),
+        { status: 500, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ success: true }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+
+  } catch (err) {
+
+    console.error("Function error:", err);
+
+    return new Response(
+      JSON.stringify({ error: "خطأ داخلي في الخادم" }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
   }
 
-  return new Response(JSON.stringify({ success: true }), { status: 200 });
 });
+}
