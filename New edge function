@@ -441,7 +441,7 @@ Deno.serve(async (req: Request) => {
       for (let m = minStart; m < endMin; m += slot) {
         const h = Math.floor(m / 60);
         const min = m % 60;
-        const t = `\( {h.toString().padStart(2, "0")}: \){min.toString().padStart(2, "0")}`;
+        const t = `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
 
         if (booked.has(t)) continue;
         if (breakStart !== null && breakEnd !== null && m >= breakStart && m < breakEnd) continue;
