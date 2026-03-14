@@ -1,0 +1,208 @@
+// supabase/functions/check-booked-times/index.ts
+
+import { createClient } from "npm:@supabase/supabase-js@2.29.0";
+import { DateTime } from "npm:luxon@3.4.4";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const supabase = createClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY,
+    );
+
+    // -----------------------------------------
+    // 1️⃣ جلب إعدادات الشركة
+    // -----------------------------------------
+
+    const { data: settings, error: settingsError } = await supabase
+      .from("business_settings")
+      .select(
+        "timezone, booking_days_ahead, min_booking_notice_minutes",
+      )
+      .single();
+
+    if (settingsError) {
+      throw settingsError;
+    }
+
+    const timezone = settings.timezone || "UTC";
+    const bookingDays = settings.booking_days_ahead || 15;
+    const minNotice = settings.min_booking_notice_minutes || 60;
+
+    // -----------------------------------------
+    // 2️⃣ الوقت الحالي حسب timezone الشركة
+    // -----------------------------------------
+
+    const now = DateTime.utc();
+    const nowBusiness = now.setZone(timezone);
+
+    const minBookingTime = nowBusiness.plus({
+      minutes: minNotice,
+    });
+
+    const endDate = nowBusiness.plus({
+      days: bookingDays,
+    });
+
+    // -----------------------------------------
+    // 3️⃣ جلب ايام الإجازات
+    // -----------------------------------------
+
+    const { data: offDays } = await supabase
+      .from("off_days")
+      .select("date_description");
+
+    const offDates = new Set(
+      (offDays || []).map((d) =>
+        DateTime.fromISO(d.date_description).toISODate()
+      ),
+    );
+
+    // -----------------------------------------
+    // 4️⃣ جلب ساعات العمل
+    // -----------------------------------------
+
+    const { data: workingHours } = await supabase
+      .from("working_hours")
+      .select("*");
+
+    const workingMap = new Map();
+
+    for (const w of workingHours || []) {
+      workingMap.set(w.day_of_week, w);
+    }
+
+    // -----------------------------------------
+    // 5️⃣ جلب المواعيد المحجوزة
+    // -----------------------------------------
+
+    const { data: bookedAppointments } = await supabase
+      .from("appointments")
+      .select("date_time, status")
+      .gte("date_time", now.toISO())
+      .lte("date_time", endDate.toUTC().toISO());
+
+    const bookedSet = new Set(
+      (bookedAppointments || []).map((a) =>
+        DateTime.fromISO(a.date_time).toISO()
+      ),
+    );
+
+    // -----------------------------------------
+    // 6️⃣ توليد المواعيد المتاحة
+    // -----------------------------------------
+
+    const availableSlots: string[] = [];
+
+    let currentDay = nowBusiness.startOf("day");
+
+    while (currentDay <= endDate) {
+      const isoDate = currentDay.toISODate();
+
+      // تجاهل أيام الإجازات
+      if (!offDates.has(isoDate)) {
+        const weekday = currentDay.weekday % 7; // لجعل الأحد = 0
+
+        const working = workingMap.get(weekday);
+
+        if (working && working.is_open) {
+          const start = DateTime.fromISO(
+            `${isoDate}T${working.start_time}`,
+            { zone: timezone },
+          );
+
+          const end = DateTime.fromISO(
+            `${isoDate}T${working.end_time}`,
+            { zone: timezone },
+          );
+
+          let slot = start;
+
+          while (slot < end) {
+            const slotEnd = slot.plus({
+              minutes: working.slot_duration_minutes,
+            });
+
+            let isBreak = false;
+
+            if (working.break_start && working.break_end) {
+              const breakStart = DateTime.fromISO(
+                `${isoDate}T${working.break_start}`,
+                { zone: timezone },
+              );
+
+              const breakEnd = DateTime.fromISO(
+                `${isoDate}T${working.break_end}`,
+                { zone: timezone },
+              );
+
+              if (slot >= breakStart && slot < breakEnd) {
+                isBreak = true;
+              }
+            }
+
+            const slotUTC = slot.toUTC().toISO();
+
+            if (
+              !isBreak &&
+              slot >= minBookingTime &&
+              !bookedSet.has(slotUTC)
+            ) {
+              availableSlots.push(slotUTC);
+            }
+
+            slot = slotEnd;
+          }
+        }
+      }
+
+      currentDay = currentDay.plus({ days: 1 });
+    }
+
+    // -----------------------------------------
+    // 7️⃣ النتيجة
+    // -----------------------------------------
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        timezone,
+        available_slots: availableSlots,
+      }),
+      {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error.message,
+      }),
+      {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+        status: 500,
+      },
+    );
+  }
+});
