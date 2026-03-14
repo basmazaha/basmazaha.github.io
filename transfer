@@ -1246,3 +1246,301 @@ Manage Booking
   );
 
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ────────────────────────────────────────────────────────────────
+// Edge Function: send-appointment-reminders
+// إرسال تذكير قبل ≤ 6 ساعات من الموعد
+// cron يعمل كل ساعة
+// date_time مخزن UTC
+// يتطلب header: x-reminder-secret مع القيمة المحددة في REMINDER_SECRET
+// ────────────────────────────────────────────────────────────────
+
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const REMINDER_SECRET = Deno.env.get("REMINDER_SECRET"); // ← أضف هذا في متغيرات البيئة
+
+const APP_BASE_URL =
+  (Deno.env.get("APP_BASE_URL") || "https://new-91v.pages.dev/").replace(/\/+$/, "");
+
+if (!BREVO_API_KEY || !REMINDER_SECRET) {
+  console.error("Missing required env vars: BREVO_API_KEY or REMINDER_SECRET");
+
+  Deno.serve(() =>
+    new Response(
+      JSON.stringify({ error: "Server misconfiguration" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    )
+  );
+}
+
+Deno.serve(async (req: Request) => {
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  // ─────────────────────────────────────────
+  // التحقق من Header الأمان
+  // ─────────────────────────────────────────
+  const providedSecret = req.headers.get("x-reminder-secret");
+
+  if (providedSecret !== REMINDER_SECRET) {
+    console.warn(`Unauthorized request - invalid or missing x-reminder-secret`);
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 401, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+  const { DateTime } = await import("https://esm.sh/luxon");
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  // ─────────────────────────────────────────
+  // جلب timezone الخاص بالعيادة
+  // ─────────────────────────────────────────
+
+  const { data: settings } = await supabase
+    .from("business_settings")
+    .select("timezone")
+    .single();
+
+  const BUSINESS_TZ = settings?.timezone || "Africa/Cairo";
+
+  // ─────────────────────────────────────────
+  // حساب نافذة التذكير: المواعيد من الآن وحتى بعد 6 ساعات
+  // ─────────────────────────────────────────
+
+  const nowUTC = DateTime.utc();
+  const reminderUntil = nowUTC.plus({ hours: 6 });
+
+  console.log({
+    now_UTC: nowUTC.toISO(),
+    send_reminder_for_appointments_until: reminderUntil.toISO(),
+  });
+
+  // ─────────────────────────────────────────
+  // جلب وحجز المواعيد التي يجب إرسال تذكير لها الآن
+  // ─────────────────────────────────────────
+
+  const { data: appointments, error } = await supabase
+    .from("appointments")
+    .update({ reminder_sent_6h: true })
+    .eq("reminder_sent_6h", false)
+    .not("email", "is", null)
+    .in("status", ["confirmed", "rescheduled"])
+    .gte("date_time", nowUTC.toISO())
+    .lte("date_time", reminderUntil.toISO())
+    .select(`
+      id,
+      full_name,
+      email,
+      date_time,
+      reason,
+      manage_token
+    `);
+
+  if (error) {
+    console.error("Database error:", error);
+    return new Response(
+      JSON.stringify({ error: "Database error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  if (!appointments || appointments.length === 0) {
+    return new Response(
+      JSON.stringify({ message: "No reminders to send" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const failedIds: string[] = [];
+  let sentCount = 0;
+
+  // ─────────────────────────────────────────
+  // إرسال التذكيرات لكل موعد
+  // ─────────────────────────────────────────
+
+  for (const ap of appointments) {
+
+    try {
+
+      const localDate = DateTime
+        .fromISO(ap.date_time, { zone: "utc" })
+        .setZone(BUSINESS_TZ);
+
+      const formattedDateAr = localDate
+        .setLocale("ar-EG")
+        .toLocaleString(DateTime.DATE_FULL);
+
+      const formattedTimeAr = localDate
+        .setLocale("ar-EG")
+        .toFormat("hh:mm a");
+
+      const formattedTimeEn = localDate
+        .setLocale("en-US")
+        .toFormat("hh:mm a");
+
+      const manageLinkAr = `\( {APP_BASE_URL}/manage/ \){ap.manage_token}`;
+      const manageLinkEn = `\( {APP_BASE_URL}/en/manage/ \){ap.manage_token}`;
+
+      const htmlContent = `
+<div dir="rtl" style="font-family: Tahoma, Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px;">
+
+  <h2 style="color: #1a3c5e; text-align: center; margin-bottom: 24px;">تذكير بموعدك القادم</h2>
+
+  <p style="font-size: 16px; color: #333; line-height: 1.6;">مرحباً ${ap.full_name || "السيد/السيدة"}،</p>
+
+  <p style="font-size: 16px; color: #333; line-height: 1.6;">
+    هذا تذكير بموعدك القادم في عيادة دكتور عمرو لطب وتجميل الأسنان:
+  </p>
+
+  <table style="width:100%; margin:20px 0; border-collapse:collapse;">
+    <tr>
+      <td style="padding:12px; background:#f8f9fa; font-weight:bold; width:140px; border:1px solid #e0e0e0;">الاسم</td>
+      <td style="padding:12px; border:1px solid #e0e0e0;">${ap.full_name || "غير محدد"}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">التاريخ</td>
+      <td style="padding:12px; border:1px solid #e0e0e0;">${formattedDateAr || "غير محدد"}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">الوقت</td>
+      <td style="padding:12px; border:1px solid #e0e0e0;">${formattedTimeAr || "غير محدد"}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">السبب</td>
+      <td style="padding:12px; border:1px solid #e0e0e0;">${ap.reason || "غير محدد"}</td>
+    </tr>
+  </table>
+
+  <div style="margin:32px 0; padding:20px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; text-align:center;">
+    <p style="font-weight:bold; color:#1e40af; margin:0 0 16px; font-size:1.1rem;">
+      يمكنك إدارة موعدك من هنا:
+    </p>
+    <a href="${manageLinkAr}" target="_blank" rel="noopener noreferrer" style="display:inline-block; padding:14px 32px; background:#3b82f6; color:white; text-decoration:none; border-radius:8px; font-weight:bold; font-size:1.1rem;">
+      إدارة حجزي الآن
+    </a>
+  </div>
+
+  <hr style="border:none; border-top:1px solid #e0e0e0; margin:40px 0;">
+
+  <div dir="ltr">
+    <h2 style="color:#1a3c5e; text-align:center; margin-bottom:24px;">Appointment Reminder</h2>
+
+    <p style="font-size:16px; color:#333; line-height:1.6;">Hello ${ap.full_name || "Dear Patient"},</p>
+
+    <p style="font-size:16px; color:#333; line-height:1.6;">
+      This is to remind you of your upcoming appointment at DR Amr Clinic:
+    </p>
+
+    <table style="width:100%; margin:20px 0; border-collapse:collapse;">
+      <tr>
+        <td style="padding:12px; background:#f8f9fa; font-weight:bold; width:140px; border:1px solid #e0e0e0;">Name</td>
+        <td style="padding:12px; border:1px solid #e0e0e0;">${ap.full_name || "Not specified"}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Date</td>
+        <td style="padding:12px; border:1px solid #e0e0e0;">${localDate.toISODate() || "Not specified"}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Time</td>
+        <td style="padding:12px; border:1px solid #e0e0e0;">${formattedTimeEn || "Not specified"}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px; background:#f8f9fa; font-weight:bold; border:1px solid #e0e0e0;">Reason</td>
+        <td style="padding:12px; border:1px solid #e0e0e0;">${ap.reason || "Not specified"}</td>
+      </tr>
+    </table>
+
+    <div style="margin:32px 0; padding:20px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; text-align:center;">
+      <p style="font-weight:bold; color:#1e40af; margin:0 0 16px; font-size:1.1rem;">
+        You can manage your appointment here:
+      </p>
+      <a href="${manageLinkEn}" target="_blank" rel="noopener noreferrer" style="display:inline-block; padding:14px 32px; background:#3b82f6; color:white; text-decoration:none; border-radius:8px; font-weight:bold; font-size:1.1rem;">
+        Manage Booking Now
+      </a>
+    </div>
+  </div>
+
+</div>`;
+
+      const payload = {
+        sender: {
+          name: "عيادة د. عمرو",
+          email: "info@dramrclinic.online"
+        },
+        to: [{
+          email: ap.email,
+          name: ap.full_name || "Patient"
+        }],
+        subject: "تذكير بموعدك | Appointment Reminder",
+        htmlContent
+      };
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const err = await response.text().catch(() => "");
+        console.error(`Brevo error for appointment ${ap.id}:`, err);
+        failedIds.push(ap.id);
+        continue;
+      }
+
+      sentCount++;
+
+    } catch (err) {
+      console.error(`Processing error for appointment ${ap.id}:`, err);
+      failedIds.push(ap.id);
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // إرجاع النتيجة النهائية
+  // ─────────────────────────────────────────
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      processed: appointments.length,
+      sent: sentCount,
+      failed: failedIds.length,
+      failed_ids: failedIds
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }
+  );
+
+});
