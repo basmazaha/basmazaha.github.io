@@ -1,4 +1,6 @@
+// ======================
 // supabase/functions/check-booked-times/index.ts
+// ======================
 
 import { createClient } from "npm:@supabase/supabase-js@2.29.0";
 
@@ -37,7 +39,6 @@ Deno.serve(async (req: Request) => {
     // ======================
     // تحميل الإعدادات
     // ======================
-
     const { data: settings } = await supabase
       .from("business_settings")
       .select("timezone,booking_days_ahead,min_booking_notice_minutes")
@@ -47,12 +48,9 @@ Deno.serve(async (req: Request) => {
     const bookingDaysAhead = settings?.booking_days_ahead ?? 15;
     const notice = settings?.min_booking_notice_minutes ?? 60;
 
-const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dateFormatter);
-
     // ======================
     // ساعات العمل
     // ======================
-
     const { data: hours } = await supabase
       .from("working_hours")
       .select(
@@ -60,7 +58,6 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
       );
 
     const workingMap = new Map();
-
     for (const h of hours ?? []) {
       workingMap.set(h.day_of_week, h);
     }
@@ -68,21 +65,7 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
     // ======================
     // الوقت الحالي
     // ======================
-
     const now = new Date();
-
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(now);
-
-    const hour = Number(parts.find((p) => p.type === "hour")?.value);
-    const minute = Number(parts.find((p) => p.type === "minute")?.value);
-
-    // استخدام الدالة الجديدة
-const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dateFormatter);
 
     const dateFormatter = new Intl.DateTimeFormat("en-CA", {
       timeZone: timezone,
@@ -92,13 +75,11 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
     });
 
     const todayStr = dateFormatter.format(now);
-
     const today = new Date(todayStr);
 
     // ======================
-    // off days
+    // أيام الإجازة
     // ======================
-
     const { data: offDays } = await supabase
       .from("off_days")
       .select("date")
@@ -109,13 +90,13 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
     // ======================
     // AVAILABLE DATES
     // ======================
-
     if (query_type === "available_dates_next_days") {
-
       const available: string[] = [];
 
-      for (let i = 0; i < bookingDaysAhead; i++) {
+      // الآن + إشعار الحد الأدنى
+      const nowWithNotice = new Date(now.getTime() + notice * 60 * 1000);
 
+      for (let i = 0; i < bookingDaysAhead; i++) {
         const d = new Date(today);
         d.setDate(d.getDate() + i);
 
@@ -124,7 +105,6 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
         if (offSet.has(dateStr)) continue;
 
         const dow = d.getUTCDay();
-
         const config = workingMap.get(dow);
 
         if (!config || !config.is_open) continue;
@@ -133,37 +113,41 @@ const { minutes: allowedMinutesToday } = getAllowedMinutes(timezone, notice, dat
         const end = toMin(config.end_time);
         const slot = config.slot_duration_minutes ?? 15;
 
-        const start = toMin(config.start_time);
-const end = toMin(config.end_time);
-const slot = config.slot_duration_minutes ?? 15;
+        let firstSlot = start;
 
-let firstSlot = start;
+        const dayStrWithNotice = dateFormatter.format(nowWithNotice);
 
-// ======================
-// حساب أول وقت مسموح في هذا اليوم (باستخدام allowedMinutesToday)
-// ======================
-if (dateStr === todayStr) {
-    const r = allowedMinutesToday % slot;
-    firstSlot = Math.max(allowedMinutesToday + (r ? slot - r : 0), start);
-}
+        if (dateStr === dayStrWithNotice) {
+          const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: timezone,
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).formatToParts(nowWithNotice);
 
-if (firstSlot < end) {
-    available.push(dateStr);
-}
+          const hour = Number(parts.find((p) => p.type === "hour")?.value);
+          const minute = Number(parts.find((p) => p.type === "minute")?.value);
+          const nowMinutesAdjusted = hour * 60 + minute;
+
+          const r = nowMinutesAdjusted % slot;
+          firstSlot = Math.max(nowMinutesAdjusted + (r ? slot - r : 0), start);
+        }
+
+        if (firstSlot < end) {
+          available.push(dateStr);
+        }
+      }
 
       return json({ available_dates: available });
     }
 
     // ======================
-    // AVAILABLE TIMES
+    // AVAILABLE TIMES FOR DATE
     // ======================
-
     if (query_type === "available_times_for_date") {
-
       if (!date) return json({ available_times: [] });
 
       const dow = new Date(date).getUTCDay();
-
       const config = workingMap.get(dow);
 
       if (!config || !config.is_open) {
@@ -177,41 +161,40 @@ if (firstSlot < end) {
       const breakStart = config.break_start ? toMin(config.break_start) : null;
       const breakEnd = config.break_end ? toMin(config.break_end) : null;
 
-      // ======================
-// حساب أول وقت مسموح بالحجز حسب min_booking_notice_minutes
-// ======================
-const { dateStr: allowedDateStr, minutes: allowedMinutes } = 
-  getAllowedMinutes(timezone, notice, dateFormatter);
+      let minStart = start;
 
-let minStart = start;
+      // الآن + إشعار الحد الأدنى
+      const nowWithNotice = new Date(now.getTime() + notice * 60 * 1000);
+      const dayStrWithNotice = dateFormatter.format(nowWithNotice);
 
-// إذا كان التاريخ المطلوب قبل التاريخ المسموح → لا يوجد أي مواعيد
-if (date < allowedDateStr) {
-  return json({ available_times: [] });
-}
+      if (date === dayStrWithNotice) {
+        const parts = new Intl.DateTimeFormat("en-US", {
+          timeZone: timezone,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).formatToParts(nowWithNotice);
 
-// إذا كان التاريخ بعد التاريخ المسموح → نبدأ من بداية الدوام
-if (date > allowedDateStr) {
-  minStart = start;
-} 
-// نفس اليوم المسموح → نبدأ من الوقت المسموح + تعديل الـ slot
-else {
-  const r = allowedMinutes % slot;
-  minStart = Math.max(allowedMinutes + (r ? slot - r : 0), start);
-}
+        const hour = Number(parts.find((p) => p.type === "hour")?.value);
+        const minute = Number(parts.find((p) => p.type === "minute")?.value);
+        const nowMinutesAdjusted = hour * 60 + minute;
+
+        const r = nowMinutesAdjusted % slot;
+        minStart = Math.max(nowMinutesAdjusted + (r ? slot - r : 0), start);
+      }
 
       const booked = await getBooked(date, timezone);
 
       const result: string[] = [];
 
       for (let m = minStart; m < end; m += slot) {
-
         if (
           breakStart !== null &&
           breakEnd !== null &&
           m >= breakStart &&
           m < breakEnd
-        ) continue;
+        )
+          continue;
 
         const t = toTime(m);
 
@@ -226,33 +209,25 @@ else {
     // ======================
     // BOOKED TIMES
     // ======================
-
     if (query_type === "booked_times") {
-
       if (!date) return json({ booked: [] });
 
       const booked = await getBooked(date, timezone);
-
       return json({ booked: Array.from(booked) });
     }
 
     return json({ error: "Invalid query_type" }, 400);
-
   } catch (e) {
-
     console.error(e);
-
     return json({ error: "Server error" }, 500);
   }
 });
-
 
 // ======================
 // helpers
 // ======================
 
 function json(data: any, status = 200) {
-
   return new Response(JSON.stringify(data), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -260,50 +235,17 @@ function json(data: any, status = 200) {
 }
 
 function toMin(t: string) {
-
   const [h, m] = t.split(":").map(Number);
-
   return h * 60 + m;
 }
 
 function toTime(m: number) {
-
   const h = Math.floor(m / 60);
   const min = m % 60;
-
-  return `${h.toString().padStart(2, "0")}:${min
-    .toString()
-    .padStart(2, "0")}`;
+  return `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
 }
-
-
-// ←←← أضف هذه الدالة الجديدة هنا
-function getAllowedMinutes(timezone: string, noticeMinutes: number, dateFormatter: Intl.DateTimeFormat): { 
-  dateStr: string; 
-  minutes: number; 
-} {
-  const allowedFrom = new Date(Date.now() + noticeMinutes * 60 * 1000);
-
-  const dateStr = dateFormatter.format(allowedFrom);
-
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(allowedFrom);
-
-  const h = Number(parts.find((p) => p.type === "hour")?.value);
-  const m = Number(parts.find((p) => p.type === "minute")?.value);
-
-  return { dateStr, minutes: h * 60 + m };
-}
-
-async function getBooked(...) { ... }
-
 
 async function getBooked(date: string, timezone: string) {
-
   const start = `${date}T00:00:00Z`;
   const end = `${date}T23:59:59Z`;
 
@@ -323,12 +265,9 @@ async function getBooked(date: string, timezone: string) {
   });
 
   for (const r of data ?? []) {
-
     const t = formatter.format(new Date(r.date_time));
-
     booked.add(t);
   }
 
   return booked;
 }
-
