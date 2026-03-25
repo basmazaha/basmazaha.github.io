@@ -18,6 +18,28 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false },
 });
 
+// ======================
+// دالة للحصول على منتصف الليل حسب timezone
+// ======================
+function getTodayInTimezone(timezone: string) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+
+  const year = parts.find((p) => p.type === "year")!.value;
+  const month = parts.find((p) => p.type === "month")!.value;
+  const day = parts.find((p) => p.type === "day")!.value;
+
+  return new Date(`${year}-${month}-${day}T00:00:00`);
+}
+
+// ======================
+// الخادم
+// ======================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -64,16 +86,7 @@ Deno.serve(async (req: Request) => {
     // الوقت الحالي
     // ======================
     const now = new Date();
-
-    const dateFormatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-
-    const todayStr = dateFormatter.format(now);
-    const today = new Date(todayStr);
+    const today = getTodayInTimezone(timezone);
 
     // ======================
     // أيام الإجازة
@@ -81,7 +94,7 @@ Deno.serve(async (req: Request) => {
     const { data: offDays } = await supabase
       .from("off_days")
       .select("date")
-      .gte("date", todayStr);
+      .gte("date", today.toISOString().split("T")[0]);
 
     const offSet = new Set(offDays?.map((d) => d.date));
 
@@ -98,11 +111,13 @@ Deno.serve(async (req: Request) => {
         const d = new Date(today);
         d.setDate(d.getDate() + i);
 
-        const dateStr = d.toISOString().split("T")[0];
+        // استخدام timezone للحصول على التاريخ الصحيح
+        const dateStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(d);
 
+        // تخطي أيام الإجازة
         if (offSet.has(dateStr)) continue;
 
-        const dow = d.getUTCDay();
+        const dow = new Date(d).getUTCDay();
         const config = workingMap.get(dow);
 
         if (!config || !config.is_open) continue;
@@ -113,8 +128,11 @@ Deno.serve(async (req: Request) => {
 
         let firstSlot = start;
 
-        // حساب الوقت المتاح بعد notice فقط إذا اليوم الحالي
-        if (dateStr === dateFormatter.format(nowWithNotice)) {
+        const dayStrWithNotice = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(
+          nowWithNotice
+        );
+
+        if (dateStr === dayStrWithNotice) {
           const parts = new Intl.DateTimeFormat("en-US", {
             timeZone: timezone,
             hour: "2-digit",
@@ -162,9 +180,11 @@ Deno.serve(async (req: Request) => {
 
       // الآن + إشعار الحد الأدنى
       const nowWithNotice = new Date(now.getTime() + notice * 60 * 1000);
+      const dayStrWithNotice = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(
+        nowWithNotice
+      );
 
-      // إذا التاريخ الحالي نفسه اليوم بعد الإشعار
-      if (date === dateFormatter.format(nowWithNotice)) {
+      if (date === dayStrWithNotice) {
         const parts = new Intl.DateTimeFormat("en-US", {
           timeZone: timezone,
           hour: "2-digit",
@@ -185,13 +205,7 @@ Deno.serve(async (req: Request) => {
       const result: string[] = [];
 
       for (let m = minStart; m < end; m += slot) {
-        if (
-          breakStart !== null &&
-          breakEnd !== null &&
-          m >= breakStart &&
-          m < breakEnd
-        )
-          continue;
+        if (breakStart !== null && breakEnd !== null && m >= breakStart && m < breakEnd) continue;
 
         const t = toTime(m);
 
