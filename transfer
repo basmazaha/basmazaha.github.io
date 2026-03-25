@@ -19,7 +19,6 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
 });
 
 Deno.serve(async (req: Request) => {
-
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -35,7 +34,6 @@ Deno.serve(async (req: Request) => {
   const { query_type = "booked_times", date } = body;
 
   try {
-
     // ======================
     // تحميل الإعدادات
     // ======================
@@ -115,9 +113,8 @@ Deno.serve(async (req: Request) => {
 
         let firstSlot = start;
 
-        const dayStrWithNotice = dateFormatter.format(nowWithNotice);
-
-        if (dateStr === dayStrWithNotice) {
+        // حساب الوقت المتاح بعد notice فقط إذا اليوم الحالي
+        if (dateStr === dateFormatter.format(nowWithNotice)) {
           const parts = new Intl.DateTimeFormat("en-US", {
             timeZone: timezone,
             hour: "2-digit",
@@ -165,9 +162,9 @@ Deno.serve(async (req: Request) => {
 
       // الآن + إشعار الحد الأدنى
       const nowWithNotice = new Date(now.getTime() + notice * 60 * 1000);
-      const dayStrWithNotice = dateFormatter.format(nowWithNotice);
 
-      if (date === dayStrWithNotice) {
+      // إذا التاريخ الحالي نفسه اليوم بعد الإشعار
+      if (date === dateFormatter.format(nowWithNotice)) {
         const parts = new Intl.DateTimeFormat("en-US", {
           timeZone: timezone,
           hour: "2-digit",
@@ -226,7 +223,6 @@ Deno.serve(async (req: Request) => {
 // ======================
 // helpers
 // ======================
-
 function json(data: any, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
