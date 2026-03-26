@@ -1,549 +1,1933 @@
-// app/dashboard/working-hours/OffDaysSection.tsx
+//app/dashboard/search/SearchAppointmentsTable.tsx
 
 'use client';
 
-import { useState } from 'react';
-import { addOffDay, deleteOffDay, upsertOffDays } from './actions';
-import type { OffDay } from './types';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { format, parse } from 'date-fns';
+import { ar } from 'date-fns/locale';
+import { toZonedTime } from 'date-fns-tz';
+import { updateAppointment, searchAppointments } from './actions';
+import { DEFAULT_TIMEZONE } from '@/lib/timezone';
 
-type Props = {
-  initialOffDays: OffDay[];
+type Appointment = {
+  id: string;
+  full_name: string | null;
+  date_time: string | null;
+  phone: string | null;
+  reason: string | null;
+  status: string | null;
 };
 
-export default function OffDaysSection({ initialOffDays }: Props) {
-  const [offDays, setOffDays] = useState<OffDay[]>(initialOffDays);
-  const [originalOffDays, setOriginalOffDays] = useState<OffDay[]>(initialOffDays);
-  const [isEditing, setIsEditing] = useState(false);
-  const [newDate, setNewDate] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+type WorkingHour = {
+  day_of_week: number;
+  is_open: boolean;
+  start_time: string | null;
+  end_time: string | null;
+  slot_duration_minutes: number | null;
+  break_start: string | null;
+  break_end: string | null;
+};
 
-  const handleAdd = async () => {
-    if (!newDate) {
-      setMessage({ type: 'error', text: 'يرجى اختيار تاريخ' });
+interface SearchAppointmentsTableProps {
+  initialAppointments: Appointment[];
+  initialOffDays: string[];
+  initialWorkingHours: WorkingHour[];
+  timezone: string;
+  currentPage: number;
+  pageSize: number;
+  totalCount: number;
+}
+
+export default function SearchAppointmentsTable({
+  initialAppointments,
+  initialOffDays,
+  initialWorkingHours,
+  timezone,
+  currentPage,
+  pageSize,
+  totalCount,
+}: SearchAppointmentsTableProps) {
+
+  const tz = timezone || DEFAULT_TIMEZONE;
+
+  const [toast, setToast] = useState<string | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [formValues, setFormValues] = useState<Record<string, any>>({});
+  const [originalValues, setOriginalValues] = useState<Record<string, any>>({});
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+
+  const [searchValues, setSearchValues] = useState({
+    full_name: '',
+    phone: '',
+    status: '',
+    start_date: '',
+    end_date: '',
+  });
+
+  const [currentPageState, setCurrentPageState] = useState(currentPage);
+  const [totalCountState, setTotalCountState] = useState(totalCount);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const offDaysSet = useMemo(() => new Set(initialOffDays), [initialOffDays]);
+
+  const workingHoursByDay = useMemo(() => {
+    const map: Record<number, WorkingHour> = {};
+    initialWorkingHours.forEach(wh => {
+      map[wh.day_of_week] = wh;
+    });
+    return map;
+  }, [initialWorkingHours]);
+
+  const handleFetch = useCallback(async (
+  page: number,
+  type: 'search' | 'refresh' | 'update' = 'search'
+) => {
+
+    if (type === 'search') setIsSearching(true);
+    if (type === 'refresh') setIsRefreshing(true);
+
+    const params = {
+      full_name: searchValues.full_name || undefined,
+      phone: searchValues.phone || undefined,
+      status: searchValues.status || undefined,
+      start_date: searchValues.start_date || undefined,
+      end_date: searchValues.end_date || undefined,
+    };
+
+    const fresh = await searchAppointments(tz, params, page, pageSize);
+
+    if ('appointments' in fresh) {
+      setAppointments(fresh.appointments ?? []);
+      setTotalCountState(fresh.totalCount);
+    }
+
+    if (type === 'search') setIsSearching(false);
+    if (type === 'refresh') setIsRefreshing(false);
+
+  }, [searchValues, tz, pageSize]);
+
+  useEffect(() => {
+    handleFetch(currentPageState, 'refresh');
+  }, []);
+
+  const formatDateLocal = useCallback((iso: string | null) => {
+    if (!iso) return '—';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      return format(zoned, 'EEEE، d MMMM yyyy', { locale: ar });
+    } catch {
+      return iso.split('T')[0] || '—';
+    }
+  }, [tz]);
+
+  const formatTimeLocal = useCallback((iso: string | null) => {
+    if (!iso) return '—';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      let str = format(zoned, 'hh:mm a');
+      str = str.replace('AM', 'صباحاً').replace('PM', 'مساءً');
+      return str;
+    } catch {
+      return iso.split('T')[1]?.slice(0, 5) || '—';
+    }
+  }, [tz]);
+
+  const getDateOnly = useCallback((iso: string | null) => {
+    if (!iso) return '';
+    try {
+      return format(toZonedTime(iso, tz), 'yyyy-MM-dd');
+    } catch {
+      return '';
+    }
+  }, [tz]);
+
+  const getTimeOnly = useCallback((iso: string | null) => {
+    if (!iso) return '';
+    try {
+      return format(toZonedTime(iso, tz), 'HH:mm');
+    } catch {
+      return '';
+    }
+  }, [tz]);
+
+  const availableDates = useMemo(() => {
+
+    const dates: string[] = [];
+    const today = new Date();
+
+    for (let i = 0; i < 30; i++) {
+
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+
+      const isoDate = format(d, 'yyyy-MM-dd');
+
+      if (offDaysSet.has(isoDate)) continue;
+
+      const dayOfWeek = d.getDay();
+      const wh = workingHoursByDay[dayOfWeek];
+
+      if (wh?.is_open && wh.start_time && wh.end_time) {
+
+        const label = format(
+          toZonedTime(d, tz),
+          'EEEE d MMMM yyyy',
+          { locale: ar }
+        );
+
+        dates.push(`${isoDate}|${label}`);
+
+      }
+
+    }
+
+    return dates;
+
+  }, [offDaysSet, workingHoursByDay, tz]);
+
+  const getAvailableTimesForDate = useCallback((selectedDate: string | null) => {
+
+    if (!selectedDate) return [];
+
+    const dateObj = parse(selectedDate, 'yyyy-MM-dd', new Date());
+    const dayOfWeek = dateObj.getDay();
+    const wh = workingHoursByDay[dayOfWeek];
+
+    if (!wh || !wh.is_open || !wh.start_time || !wh.end_time) return [];
+
+    const start = parse(`${selectedDate} ${wh.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+    const end = parse(`${selectedDate} ${wh.end_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+
+    const slotMin = wh.slot_duration_minutes ?? 15;
+
+    const breakStartMs = wh.break_start
+      ? parse(`${selectedDate} ${wh.break_start}`, 'yyyy-MM-dd HH:mm:ss', new Date()).getTime()
+      : Infinity;
+
+    const breakEndMs = wh.break_end
+      ? parse(`${selectedDate} ${wh.break_end}`, 'yyyy-MM-dd HH:mm:ss', new Date()).getTime()
+      : -Infinity;
+
+    const times: string[] = [];
+
+    let current = start.getTime();
+    const endMs = end.getTime();
+    const now = toZonedTime(new Date(), tz);
+
+    while (current < endMs) {
+
+      const slotEnd = current + slotMin * 60000;
+
+      if (slotEnd > breakStartMs && current < breakEndMs) {
+        current = breakEndMs;
+        continue;
+      }
+
+      const slotDate = new Date(current);
+
+      if (
+        slotDate.toDateString() === now.toDateString() &&
+        slotDate < now
+      ) {
+        current += slotMin * 60000;
+        continue;
+      }
+
+      const timeStr = format(slotDate, 'HH:mm');
+
+      const isBooked = appointments.some(a => {
+
+        if (!a.date_time || a.status === 'cancelled') return false;
+
+        if (editingId && a.id === editingId) return false;
+
+        return (
+          getDateOnly(a.date_time) === selectedDate &&
+          getTimeOnly(a.date_time) === timeStr
+        );
+
+      });
+
+      if (!isBooked) {
+
+        let display = format(slotDate, 'hh:mm a')
+          .replace('AM', 'صباحاً')
+          .replace('PM', 'مساءً');
+
+        times.push(`${timeStr}|${display}`);
+
+      }
+
+      current += slotMin * 60000;
+
+    }
+
+    return times;
+
+  }, [appointments, editingId, workingHoursByDay, tz, getDateOnly, getTimeOnly]);
+
+  const toggleEdit = (id: string, appt: Appointment) => {
+
+    if (editingId === id) {
+      setEditingId(null);
+      setFormValues({});
+      setOriginalValues({});
+      setFormErrors({});
       return;
     }
 
-    setAdding(true);
-    setMessage(null);
+    const values = {
+      full_name: appt.full_name || '',
+      phone: appt.phone || '',
+      date: getDateOnly(appt.date_time),
+      time: getTimeOnly(appt.date_time),
+      status: appt.status || 'confirmed',
+    };
 
-    const formData = new FormData();
-    formData.append('date', newDate);
-    const trimmedDesc = newDescription.trim();
-    if (trimmedDesc) formData.append('description', trimmedDesc);
+    setEditingId(id);
+    setFormValues(values);
+    setOriginalValues(values);
+    setFormErrors({});
+  };
 
-    const result = await addOffDay(formData);
+  const getStatusText = (status: string | null) => {
+    const map: Record<string, string> = {
+      pending: 'معلق',
+      confirmed: 'مؤكد',
+      cancelled: 'ملغي',
+      rescheduled: 'معاد جدولته',
+      completed: 'مكتمل',
+      absent: 'متغيب',
+    };
+    return map[status ?? 'confirmed'] ?? 'مؤكد';
+  };
 
-    if (result.success) {
-      setOffDays(prev => [...prev, result.data]);
-      setOriginalOffDays(prev => [...prev, result.data]);
-      setNewDate('');
-      setNewDescription('');
-      setMessage({ type: 'success', text: 'تم إضافة اليوم المغلق بنجاح' });
+  const handleUpdate = async (formData: FormData) => {
+
+    setIsSubmitting(true);
+    setFormErrors({});
+
+    const appointmentId = formData.get('appointment_id') as string;
+    const original = appointments.find(a => a.id === appointmentId);
+
+    setAppointments(prev =>
+      prev.map(a =>
+        a.id === appointmentId
+          ? {
+              ...a,
+              full_name: formData.get('full_name') as string | null,
+              phone: formData.get('phone') as string | null,
+              status: formData.get('status') as string | null,
+            }
+          : a
+      )
+    );
+
+    const result = await updateAppointment(formData, tz);
+
+    if ('errors' in result) {
+
+      setFormErrors(result.errors as Record<string, string>);
+
+      if (original) {
+        setAppointments(prev =>
+          prev.map(a => a.id === appointmentId ? original : a)
+        );
+      }
+
+      setToast(Object.values(result.errors ?? {})[0] || 'بيانات غير صحيحة ❗️');
+
+    } else if ('success' in result) {
+
+      await handleFetch(currentPageState, 'update');
+      setEditingId(null);
+      setFormValues({});
+      setFormErrors({});
+
+      setToast('تم التحديث بنجاح ✅');
+
     } else {
-      setMessage({ type: 'error', text: result.error || 'فشل الإضافة' });
+
+      setToast(result.error || 'حدث خطأ ❗️');
+
     }
 
-    setAdding(false);
+    setIsSubmitting(false);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف هذا اليوم؟')) return;
-
-    const result = await deleteOffDay(id);
-
-    if (result.success) {
-      setOffDays(prev => prev.filter(d => d.id !== id));
-      setOriginalOffDays(prev => prev.filter(d => d.id !== id));
-      setMessage({ type: 'success', text: 'تم الحذف بنجاح' });
-    } else {
-      setMessage({ type: 'error', text: result.error || 'فشل الحذف' });
-    }
+  const handleSearch = () => {
+    setCurrentPageState(1);
+    handleFetch(1, 'search');
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    setMessage(null);
-
-    const result = await upsertOffDays(offDays);
-
-    if (result.success) {
-      setOriginalOffDays(offDays);
-      setMessage({ type: 'success', text: 'تم حفظ التغييرات بنجاح' });
-      setIsEditing(false);
-    } else {
-      setMessage({ type: 'error', text: result.error || 'حدث خطأ أثناء الحفظ' });
-    }
-
-    setSaving(false);
+  const handleRefresh = () => {
+    handleFetch(currentPageState, 'refresh');
   };
 
-  const handleCancel = () => {
-    setOffDays(originalOffDays);
-    setIsEditing(false);
-    setMessage(null);
+  const changePage = (newPage: number) => {
+    if (newPage === currentPageState) return;
+    setCurrentPageState(newPage);
+    handleFetch(newPage, 'refresh');
   };
+
+  const totalPages = Math.ceil(totalCountState / pageSize);
+  const maxPagesToShow = 7;
+
+  let startPage: number;
+  let endPage: number;
+
+  if (totalPages <= maxPagesToShow) {
+
+    startPage = 1;
+    endPage = totalPages;
+
+  } else {
+
+    const half = Math.floor(maxPagesToShow / 2);
+
+    startPage = Math.max(1, currentPageState - half);
+    endPage = Math.min(totalPages, currentPageState + half);
+
+    if (startPage === 1) endPage = maxPagesToShow;
+    else if (endPage === totalPages) startPage = totalPages - maxPagesToShow + 1;
+  }
+
+  const pages = Array.from(
+    { length: endPage - startPage + 1 },
+    (_, i) => startPage + i
+  );
+
+
+return (
+<>
+{/* نموذج البحث */}
+<div className="appointment-form appointment-form--search">
+<h3 className="appointment-form__title">بحث في المواعيد</h3>
+<div className="form-grid">
+<div className="form-field">
+<label className="form-label">الاسم</label>
+<input
+type="text"
+value={searchValues.full_name}
+onChange={e => setSearchValues({ ...searchValues, full_name: e.target.value })}
+className="form-input"
+placeholder="الاسم"
+/>
+</div>
+
+<div className="form-field">  
+        <label className="form-label">رقم التليفون</label>  
+        <input  
+          type="tel"  
+          value={searchValues.phone}  
+          onChange={e => setSearchValues({ ...searchValues, phone: e.target.value })}  
+          className="form-input"  
+          placeholder="01xxxxxxxxx"  
+        />  
+      </div>  
+
+
+      <div className="form-field">  
+        <label className="form-label">من تاريخ</label>  
+        <input  
+          type="date"  
+          value={searchValues.start_date}  
+          onChange={e => setSearchValues({ ...searchValues, start_date: e.target.value })}  
+          className="form-input"  
+        />  
+      </div>  
+
+      <div className="form-field">  
+        <label className="form-label">إلى تاريخ</label>  
+        <input  
+          type="date"  
+          value={searchValues.end_date}  
+          onChange={e => setSearchValues({ ...searchValues, end_date: e.target.value })}  
+          className="form-input"  
+        />  
+      </div>  
+
+        <div className="form-field">  
+        <label className="form-label">الحالة</label>  
+        <select  
+          value={searchValues.status}  
+          onChange={e => setSearchValues({ ...searchValues, status: e.target.value })}  
+          className="form-select"  
+        >  
+          <option value="">الكل</option>  
+          <option value="pending">معلق</option>  
+          <option value="confirmed">مؤكد</option>  
+          <option value="cancelled">ملغي</option>  
+          <option value="rescheduled">معاد جدولته</option>  
+          <option value="completed">مكتمل</option>  
+          <option value="absent">متغيب</option>  
+         </select>  
+         </div>  
+        
+    </div>  
+
+    <div className="form-actions">  
+      <button  
+        type="button"  
+        onClick={() => {  
+          setSearchValues({ full_name: '', phone: '', status: '', start_date: '', end_date: '' });  
+          setCurrentPageState(1);  
+          handleFetch(1);  
+        }}  
+        className="btn btn--secondary"  
+      >  
+        مسح البحث  
+      </button>  
+      <button  
+        type="button"  
+        onClick={handleSearch}  
+        disabled={isSearching}  
+        className={`btn btn--primary ${isSearching ? 'btn--disabled' : ''}`}  
+      >  
+        {isSearching ? 'جاري البحث...' : 'بحث'}  
+      </button>  
+    </div>  
+  </div>  
+
+  <div className="appointments__actions">  
+    <div   
+      style={{   
+        width: '44px',   
+        height: '44px',   
+        minWidth: '44px',   
+        minHeight: '44px',  
+        flexShrink: 0,  
+        flexGrow: 0,  
+        display: 'inline-block',  
+      }}  
+    >  
+      <button  
+        type="button"  
+        onClick={handleRefresh}  
+        className={`btn btn--refresh ${isRefreshing ? 'is-loading' : ''}`}  
+        style={{  
+          width: '100% !important',  
+          height: '100% !important',  
+          minWidth: '100%',  
+          minHeight: '100%',  
+          padding: 0,  
+          margin: 0,  
+          boxSizing: 'border-box',  
+        }}  
+        disabled={isRefreshing}  
+      >  
+        <svg  
+          className="refresh-icon-svg"  
+          style={{   
+            width: '24px',   
+            height: '24px',  
+            flexShrink: 0,  
+          }}  
+          xmlns="http://www.w3.org/2000/svg"  
+          fill="none"  
+          viewBox="0 0 24 24"  
+          stroke="currentColor"  
+          strokeWidth="2.5"  
+          strokeLinecap="round"  
+          strokeLinejoin="round"  
+        >  
+          <path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />  
+        </svg>  
+      </button>  
+    </div>  
+  </div>  
+
+  {appointments.length === 0 ? (  
+    <div className="no-appointments">  
+      لا توجد نتائج مطابقة للبحث  
+    </div>  
+  ) : (  
+    <div className="appointments-table-wrapper">  
+      <div className="table-container">  
+        <table className="appointments-table">  
+          <thead>  
+            <tr>  
+              <th>الاسم</th>  
+              <th>التليفون</th>  
+              <th>التاريخ</th>  
+              <th>الوقت</th>  
+              <th>السبب</th>  
+              <th>الحالة</th>  
+              <th>إجراءات</th>  
+            </tr>  
+          </thead>  
+          <tbody>  
+            {appointments.map(appt => {  
+              const isEditing = editingId === appt.id;  
+              const formId = `form-${appt.id}`;  
+              const currentDate = isEditing ? formValues.date : getDateOnly(appt.date_time);  
+              const availTimes = isEditing ? getAvailableTimesForDate(currentDate) : [];  
+              const hasChanges =  
+               formValues.full_name !== originalValues.full_name ||  
+               formValues.phone !== originalValues.phone ||  
+               formValues.date !== originalValues.date ||  
+               formValues.time !== originalValues.time ||  
+               formValues.status !== originalValues.status;  
+
+              return (  
+                <tr key={appt.id} className={`appointment-row ${isEditing ? 'appointment-row--editing' : ''}`}>  
+                  <td>  
+                    {isEditing ? (  
+                      <div className="input-wrapper">  
+                        <input  
+                          type="text"  
+                          name="full_name"  
+                          form={formId}  
+                          value={formValues.full_name || ''}  
+                          onChange={e => {  
+                            setFormValues({ ...formValues, full_name: e.target.value });  
+                            setFormErrors(prev => ({ ...prev, full_name: '' }));  
+                          }}  
+                          placeholder="الاسم الكامل"  
+                          className={`form-input ${formErrors.full_name ? 'form-input--error' : ''}`}  
+                        />  
+                        {formErrors.full_name && (  
+                          <span className="form-error">{formErrors.full_name}</span>  
+                        )}  
+                      </div>  
+                    ) : (  
+                      <span className="cell-content">{appt.full_name || '—'}</span>  
+                    )}  
+                  </td>  
+
+                  <td>  
+                    {isEditing ? (  
+                      <div className="input-wrapper">  
+                        <input  
+                          type="tel"  
+                          name="phone"  
+                          form={formId}  
+                          value={formValues.phone || ''}  
+                          onChange={e => {  
+                            setFormValues({ ...formValues, phone: e.target.value });  
+                            setFormErrors(prev => ({ ...prev, phone: '' }));  
+                          }}  
+                          placeholder="01xxxxxxxxx"  
+                          className={`form-input ${formErrors.phone ? 'form-input--error' : ''}`}  
+                        />  
+                        {formErrors.phone && (  
+                          <span className="form-error">{formErrors.phone}</span>  
+                        )}  
+                      </div>  
+                    ) : (  
+                      <span className="cell-content">{appt.phone || '—'}</span>  
+                    )}  
+                  </td>  
+
+                  <td>  
+                    {isEditing ? (  
+                      <select  
+                        name="date"  
+                        form={formId}  
+                        value={formValues.date || ''}  
+                        onChange={e => setFormValues({ ...formValues, date: e.target.value, time: '' })}  
+                        className="form-select"  
+                      >  
+                        <option value="">اختر تاريخاً</option>  
+                        {availableDates.map(d => {  
+                          const [iso, label] = d.split('|');  
+                          return <option key={iso} value={iso}>{label}</option>;  
+                        })}  
+                      </select>  
+                    ) : (  
+                      <span className="cell-content">  
+                        {formatDateLocal(appt.date_time)}  
+                      </span>  
+                    )}  
+                  </td>  
+
+                  <td>  
+                    {isEditing ? (  
+                      <select  
+                        name="time"  
+                        form={formId}  
+                        value={formValues.time || ''}  
+                        onChange={e => setFormValues({ ...formValues, time: e.target.value })}  
+                        className="form-select"  
+                      >  
+                        <option value="">اختر وقتاً</option>  
+                        {availTimes.map(t => {  
+                          const [iso, label] = t.split('|');  
+                          return <option key={iso} value={iso}>{label}</option>;  
+                        })}  
+                      </select>  
+                    ) : (  
+                      <span className="cell-content">  
+                        {formatTimeLocal(appt.date_time)}  
+                      </span>  
+                    )}  
+                  </td>  
+
+                  <td>  
+                    <span className="cell-content">{appt.reason || '—'}</span>  
+                  </td>  
+
+                  <td>  
+                    {isEditing ? (  
+                      <select  
+                        name="status"  
+                        form={formId}  
+                        value={formValues.status || 'confirmed'}  
+                        onChange={e => setFormValues({ ...formValues, status: e.target.value })}  
+                        className={`form-select form-select--status-${formValues.status || 'confirmed'}`}  
+                      >  
+                        <option value="pending">معلق</option>  
+                        <option value="confirmed">مؤكد</option>  
+                        <option value="rescheduled">معاد جدولته</option>  
+                        <option value="completed">مكتمل</option>  
+                        <option value="cancelled">ملغي</option>  
+                        <option value="absent">متغيب</option>  
+                      </select>  
+                    ) : (  
+                      <span className={`status-badge status-badge--${appt.status || 'confirmed'}`}>  
+                        {getStatusText(appt.status)}  
+                      </span>  
+                    )}  
+                  </td>  
+
+                  <td className="actions-cell">  
+                    {isEditing ? (  
+                      <div className="edit-actions">  
+                        <button  
+                          type="submit"  
+                          form={formId}  
+                          disabled={isSubmitting || !hasChanges}  
+                          className={`btn btn--save ${(isSubmitting || !hasChanges) ? 'btn--disabled' : ''}`}  
+                        >  
+                          {isSubmitting ? 'جاري الحفظ...' : 'حفظ'}  
+                        </button>  
+
+                        <button  
+                          type="button"  
+                          onClick={() => toggleEdit(appt.id, appt)}  
+                          className="btn btn--cancel"  
+                        >  
+                          رجوع  
+                        </button>  
+                      </div>  
+                    ) : (() => {  
+                            const nowZoned = toZonedTime(new Date(), tz);  
+
+                            const apptZoned = appt.date_time  
+                            ? toZonedTime(appt.date_time, tz)  
+                            : null;  
+
+                            const isPast = apptZoned  
+                            ? apptZoned.getTime() < nowZoned.getTime()  
+                            : false;  
+
+                            const isLockedStatus = ['cancelled', 'completed', 'absent'].includes(appt.status || '');  
+
+                            const isDisabled = isPast || isLockedStatus;  
+
+                            return (  
+                          <button  
+                           type="button"  
+                           onClick={() => !isDisabled && toggleEdit(appt.id, appt)}  
+                           className={`btn btn--edit ${isDisabled ? 'btn--disabled' : ''}`}  
+                           disabled={isDisabled}  
+                           >  
+                              تعديل  
+                          </button>  
+                          );  
+                         })()}  
+                  
+
+                    <form id={formId} action={handleUpdate} className="form--hidden">  
+                      <input type="hidden" name="appointment_id" value={appt.id} />  
+                    </form>  
+                  </td>  
+                </tr>  
+              );  
+            })}  
+          </tbody>  
+        </table>  
+      </div>  
+    </div>  
+  )}  
+
+  {/* الـ Pagination */}  
+  {totalCountState > 0 && (  
+    <div className="pagination-container">  
+      <div className="pagination">  
+        <button  
+          className="pagination-btn"  
+          disabled={currentPageState === 1}  
+          onClick={() => changePage(1)}  
+        >  
+          الأولى  
+        </button>  
+
+        <button  
+          className="pagination-btn"  
+          disabled={currentPageState === 1}  
+          onClick={() => changePage(currentPageState - 1)}  
+        >  
+          السابق  
+        </button>  
+
+        {startPage > 1 && (  
+          <>  
+            <button  
+              className="pagination-btn"  
+              onClick={() => changePage(1)}  
+            >  
+              1  
+            </button>  
+            {startPage > 2 && <span className="pagination-ellipsis">...</span>}  
+          </>  
+        )}  
+
+        {pages.map(p => (  
+          <button  
+            key={p}  
+            className={`pagination-btn ${p === currentPageState ? 'active' : ''}`}  
+            onClick={() => changePage(p)}  
+          >  
+            {p}  
+          </button>  
+        ))}  
+
+        {endPage < totalPages && (  
+          <>  
+            {endPage < totalPages - 1 && <span className="pagination-ellipsis">...</span>}  
+            <button  
+              className="pagination-btn"  
+              onClick={() => changePage(totalPages)}  
+            >  
+              {totalPages}  
+            </button>  
+          </>  
+        )}  
+
+        <button  
+          className="pagination-btn"  
+          disabled={currentPageState === totalPages}  
+          onClick={() => changePage(currentPageState + 1)}  
+        >  
+          التالي  
+        </button>  
+
+        <button  
+          className="pagination-btn"  
+          disabled={currentPageState === totalPages}  
+          onClick={() => changePage(totalPages)}  
+        >  
+          الأخيرة  
+        </button>  
+      </div>  
+
+      <div className="pagination-info">  
+        عرض {(currentPageState - 1) * pageSize + 1} – {Math.min(currentPageState * pageSize, totalCountState)} من أصل {totalCountState} موعد  
+      </div>  
+    </div>  
+  )}  
+
+  {toast && (  
+   <div className="toast">  
+  {toast}  
+   </div>  
+  )}  
+</>
+
+);
+}
+
+// app/dashboard/search/page.tsx
+
+import { supabaseServer } from '@/lib/supabaseServer';
+import SearchAppointmentsTable from './SearchAppointmentsTable';
+import { getBusinessTimezone } from './actions';   // تأكدي إن المسار ده صح
+import './SearchPage.css';
+
+// جلب الأيام المغلقة (off_days)
+async function getOffDays() {
+  const supabase = supabaseServer;
+
+  const { data, error } = await supabase
+    .from('off_days')                    // ← غيّري اسم الجدول لو مختلف عندك
+    .select('date')
+    .order('date', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching off days:', error);
+    return [];
+  }
+
+  return data?.map(row => row.date) || [];
+}
+
+// جلب ساعات العمل (working_hours)
+async function getWorkingHours() {
+  const supabase = supabaseServer;
+
+  const { data, error } = await supabase
+    .from('working_hours')               // ← غيّري اسم الجدول لو مختلف
+    .select('*')
+    .order('day_of_week');
+
+  if (error) {
+    console.error('Error fetching working hours:', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+export default async function SearchPage() {
+  const timezone = await getBusinessTimezone();
+  const offDays = await getOffDays();
+  const workingHours = await getWorkingHours();
 
   return (
-    <section className="off-days-section">
-      <div className="section-header">
-        <h2>الأيام المغلقة (العطلات الاستثنائية)</h2>
+    <div className="dashboard-content">
 
-        {isEditing ? (
-          <div className="edit-controls">
-            <button className="btn btn-cancel" onClick={handleCancel} disabled={saving || adding}>
-              إلغاء
-            </button>
-            <button className="btn btn-save" onClick={handleSave} disabled={saving || adding}>
-              {saving ? 'جاري الحفظ...' : 'حفظ التغييرات'}
-            </button>
-          </div>
-        ) : (
-          <button className="btn btn-edit" onClick={() => setIsEditing(true)}>
-            تعديل
-          </button>
-        )}
-      </div>
-
-      {message && (
-        <div className={`message ${message.type}`}>{message.text}</div>
-      )}
-
-      <div className="table-wrapper">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>التاريخ</th>
-              <th>الوصف</th>
-              {isEditing && <th>إجراء</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {offDays.map(day => (
-              <tr key={day.id}>
-                <td>
-                  {isEditing ? (
-                    <input
-                      className="form-input"
-                      type="date"
-                      value={day.date}
-                      onChange={e =>
-                        setOffDays(prev =>
-                          prev.map(d =>
-                            d.id === day.id ? { ...d, date: e.target.value } : d
-                          )
-                        )
-                      }
-                    />
-                  ) : (
-                    new Date(day.date).toLocaleDateString('ar-EG', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input
-                      className="form-input"
-                      type="text"
-                      value={day.description || ''}
-                      onChange={e =>
-                        setOffDays(prev =>
-                          prev.map(d =>
-                            d.id === day.id
-                              ? { ...d, description: e.target.value.trim() || null }
-                              : d
-                          )
-                        )
-                      }
-                    />
-                  ) : day.description || '—'}
-                </td>
-                {isEditing && (
-                  <td>
-                    <button
-                      className="btn btn-delete small"
-                      onClick={() => handleDelete(day.id)}
-                    >
-                      حذف
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {isEditing && (
-        <div className="add-new-row">
-          <h3>إضافة يوم مغلق جديد</h3>
-          <div className="add-form">
-            <input
-              className="form-input"
-              type="date"
-              value={newDate}
-              onChange={e => setNewDate(e.target.value)}
-              required
-            />
-            <input
-              className="form-input"
-              type="text"
-              placeholder="الوصف (اختياري)"
-              value={newDescription}
-              onChange={e => setNewDescription(e.target.value)}
-            />
-            <button
-              className="btn btn-add"
-              onClick={handleAdd}
-              disabled={adding || saving}
-            >
-              {adding ? 'جاري الإضافة...' : 'إضافة'}
-            </button>
-          </div>
-        </div>
-      )}
-    </section>
+      <SearchAppointmentsTable
+        initialAppointments={[]}
+        initialOffDays={offDays}
+        initialWorkingHours={workingHours}
+        timezone={timezone}
+        currentPage={1}
+        pageSize={20}
+        totalCount={0}
+      />
+    </div>
   );
 }
 
 
 
-
-
-
-
-
-// app/dashboard/working-hours/actions.ts 
-
-
-'use server';
-
-import { supabaseServer } from '@/lib/supabaseServer';
-import { revalidatePath } from 'next/cache';
-import type { WorkingHour, OffDay } from './types';
-
-type ActionResult<T = unknown> =
-  | { success: true; data: T }
-  | { success: false; error: string };
-
-export async function upsertWorkingHours(hours: WorkingHour[]): Promise<ActionResult<null>> {
-  try {
-    const { error } = await supabaseServer
-      .from('working_hours')
-      .upsert(
-        hours.map((h) => ({
-          day_of_week: h.day_of_week,
-          is_open: h.is_open,
-          start_time: h.start_time || null,
-          end_time: h.end_time || null,
-          slot_duration_minutes: h.slot_duration_minutes ?? null,
-          break_start: h.break_start || null,
-          break_end: h.break_end || null,
-        })),
-        { onConflict: 'day_of_week' }
-      );
-
-    if (error) throw error;
-
-    revalidatePath('/dashboard/working-hours');
-    return { success: true, data: null };
-  } catch (err: any) {
-    console.error('upsertWorkingHours error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء حفظ ساعات العمل' };
-  }
-}
-
-export async function upsertOffDays(days: OffDay[]): Promise<ActionResult<null>> {
-  try {
-    const { error } = await supabaseServer
-      .from('off_days')
-      .upsert(
-        days.map((d) => ({
-          id: d.id,
-          date: d.date,
-          description: d.description,
-        })),
-        { onConflict: 'id' }
-      );
-
-    if (error) throw error;
-
-    revalidatePath('/dashboard/working-hours');
-    return { success: true, data: null };
-  } catch (err: any) {
-    console.error('upsertOffDays error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء حفظ الأيام المغلقة' };
-  }
-}
-
-export async function addOffDay(formData: FormData): Promise<ActionResult<OffDay>> {
-  const date = formData.get('date') as string;
-  const description = (formData.get('description') as string)?.trim() || null;
-
-  if (!date) {
-    return { success: false, error: 'التاريخ مطلوب' };
-  }
-
-  try {
-    const { data, error } = await supabaseServer
-      .from('off_days')
-      .insert({ date, description })
-      .select('id, date, description')
-      .single();
-
-    if (error) throw error;
-    if (!data) throw new Error('لم يتم إرجاع السجل الجديد');
-
-    revalidatePath('/dashboard/working-hours');
-    return { success: true, data };
-  } catch (err: any) {
-    console.error('addOffDay error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء إضافة اليوم المغلق' };
-  }
-}
-
-export async function deleteOffDay(id: string): Promise<ActionResult<null>> {
-  try {
-    const { error } = await supabaseServer
-      .from('off_days')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
-
-    revalidatePath('/dashboard/working-hours');
-    return { success: true, data: null };
-  } catch (err: any) {
-    console.error('deleteOffDay error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء الحذف' };
-  }
-}
-
-export async function getWorkingHoursAndOffDays(): Promise<
-  ActionResult<{ workingHours: WorkingHour[]; offDays: OffDay[] }>
-> {
-  const { data: hours, error: hoursError } = await supabaseServer
-    .from('working_hours')
-    .select('*')
-    .order('day_of_week', { ascending: true });
-
-  const { data: offDays, error: offError } = await supabaseServer
-    .from('off_days')
-    .select('id, date, description')
-    .order('date', { ascending: false });
-
-  if (hoursError || offError) {
-    console.error('خطأ في جلب البيانات:', { hoursError, offError });
-    return { success: false, error: 'فشل جلب البيانات' };
-  }
-
-  return {
-    success: true,
-    data: {
-      workingHours: hours ?? [],
-      offDays: offDays ?? [],
-    },
-  };
-}
-
-
-
-
-
-
-
-
-
-
-// app/dashboard/settings/bookingformsettings/BookingFormSettingsForm.tsx
-// app/dashboard/settings/bookingformsettings/BookingFormSettingsForm.tsx
+// app/dashboard/today-appointments/TodayAppointmentsTable.tsx
 
 'use client';
 
-import { useFormState, useFormStatus } from 'react-dom';
-import { updateBookingFormSettings } from './actions';
+import { useState, useMemo, useCallback, useEffect, useReducer } from 'react';
+import { useRouter } from 'next/navigation';
+import { format, parse } from 'date-fns';
+import { ar } from 'date-fns/locale';
+import { toZonedTime } from 'date-fns-tz';
+import { updateAppointment, insertAppointment, fetchTodayAppointments } from '../actions';
+import { DEFAULT_TIMEZONE } from '@/lib/timezone';
 
-type FormState = {
-  success: boolean;
-  message: string;
+type Appointment = {
+  id: string;
+  full_name: string | null;
+  date_time: string | null;   // ISO string in UTC (timestamptz)
+  phone: string | null;
+  reason: string | null;
+  status: string | null;
 };
 
-const initialState: FormState = {
-  success: false,
-  message: '',
+type WorkingHour = {
+  day_of_week: number;
+  is_open: boolean;
+  start_time: string | null;
+  end_time: string | null;
+  slot_duration_minutes: number | null;
+  break_start: string | null;
+  break_end: string | null;
 };
 
-const MIN_NOTICE_OPTIONS = [
-  { label: '1 ساعة', value: 60 },
-  { label: '2 ساعتان', value: 120 },
-  { label: '3 ساعات', value: 180 },
-  { label: '6 ساعات', value: 360 },
-  { label: '12 ساعة', value: 720 },
-  { label: '24 ساعة', value: 1440 },
-  { label: '48 ساعة', value: 2880 },
-];
-const DAYS_AHEAD_OPTIONS = [7, 15, 30, 60, 90];
-
-interface Props {
-  initialMinNotice: number;
-  initialDaysAhead: number;
+interface AppointmentsTableProps {
+  initialAppointments: Appointment[];
+  initialOffDays: string[];
+  initialWorkingHours: WorkingHour[];
+  timezone: string;
+  currentPage: number;
+  pageSize: number;
+  totalCount: number;
 }
 
-export default function BookingFormSettingsForm({
-  initialMinNotice,
-  initialDaysAhead,
-}: Props) {
-  const [state, formAction] = useFormState(
-    updateBookingFormSettings,
-    initialState
-  );
+export default function TodayAppointmentsTable({
+  initialAppointments,
+  initialOffDays,
+  initialWorkingHours,
+  timezone,
+  currentPage,
+  pageSize,
+  totalCount,
+}: AppointmentsTableProps) {
+  const tz = timezone || DEFAULT_TIMEZONE;
+  const router = useRouter();
 
-  const { pending } = useFormStatus();
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [formValues, setFormValues] = useState<Record<string, any>>({});
+  const [originalValues, setOriginalValues] = useState<Record<string, any>>({});
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // الوقت الحالي (يُحدث تلقائياً)
+  const [now, setNow] = useState(() => toZonedTime(new Date(), tz));
+
+  // لإجبار React على إعادة حساب الـ sortedAppointments كل 30 ثانية
+  const [, forceUpdate] = useReducer((x) => x + 1, 0);
+
+  // تحديث الوقت الحالي + إجبار التحديث التلقائي كل 30 ثانية
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(toZonedTime(new Date(), tz));
+      forceUpdate(); // هذا هو المفتاح لتحديث ترتيب المواعيد تلقائياً
+    }, 30000); // كل 30 ثانية
+
+    return () => clearInterval(interval);
+  }, [tz]);
+
+  // إخفاء التوست تلقائياً
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const fresh = await fetchTodayAppointments(timezone, currentPage, pageSize);
+      if ('appointments' in fresh) {
+        setAppointments(fresh.appointments ?? []);
+      }
+    } catch (e) {
+      console.error('Refresh error:', e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const offDaysSet = useMemo(() => new Set(initialOffDays), [initialOffDays]);
+
+  const workingHoursByDay = useMemo(() => {
+    const map: Record<number, WorkingHour> = {};
+    initialWorkingHours.forEach((wh) => (map[wh.day_of_week] = wh));
+    return map;
+  }, [initialWorkingHours]);
+
+  // ====================== تنسيقات التاريخ والوقت ======================
+  const formatDateLocal = useCallback((iso: string | null) => {
+    if (!iso) return '—';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      return format(zoned, 'EEEE، d MMMM yyyy', { locale: ar });
+    } catch (e) {
+      console.error('خطأ تنسيق التاريخ:', e);
+      return iso.split('T')[0] || '—';
+    }
+  }, [tz]);
+
+  const formatTimeLocal = useCallback((iso: string | null) => {
+    if (!iso) return '—';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      let str = format(zoned, 'hh:mm a');
+      str = str.replace('AM', 'صباحاً').replace('PM', 'مساءً');
+      return str;
+    } catch (e) {
+      console.error('خطأ تنسيق الوقت:', e);
+      return iso.split('T')[1]?.slice(0, 5) || '—';
+    }
+  }, [tz]);
+
+  const getDateOnly = useCallback((iso: string | null) => {
+    if (!iso) return '';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      return format(zoned, 'yyyy-MM-dd');
+    } catch {
+      return '';
+    }
+  }, [tz]);
+
+  const getTimeOnly = useCallback((iso: string | null) => {
+    if (!iso) return '';
+    try {
+      const zoned = toZonedTime(iso, tz);
+      return format(zoned, 'HH:mm');
+    } catch {
+      return '';
+    }
+  }, [tz]);
+
+  // ====================== ترتيب المواعيد (الجزء الأهم) ======================
+  const sortedAppointments = useMemo(() => {
+    const currentNow = now.getTime();
+
+    return [...appointments].sort((a, b) => {
+      if (!a.date_time) return 1;
+      if (!b.date_time) return -1;
+
+      const ta = toZonedTime(a.date_time, tz).getTime();
+      const tb = toZonedTime(b.date_time, tz).getTime();
+
+      // ================================================================
+      // 👇👇👇 التعديل هنا - مدة اعتبار الموعد فائتاً
+      // حالياً: 5 دقائق (300000 مللي ثانية)
+      // إذا أردت تغيير المدة:
+      // - 3 دقائق  →  3 * 60 * 1000
+      // - 10 دقائق → 10 * 60 * 1000
+      // - 15 دقيقة → 15 * 60 * 1000
+      const GRACE_PERIOD_MINUTES = 5;   // ←←← غيّر الرقم هنا فقط
+      const aPast = ta + GRACE_PERIOD_MINUTES * 60 * 1000 < currentNow;
+      const bPast = tb + GRACE_PERIOD_MINUTES * 60 * 1000 < currentNow;
+      // ================================================================
+
+      // المواعيد القادمة أولاً، ثم المواعيد الفائتة في الأسفل
+      if (aPast !== bPast) return aPast ? 1 : -1;
+
+      return ta - tb;
+    });
+  }, [appointments, now, tz]);
+
+  // ====================== التواريخ المتاحة ======================
+  const availableDates = useMemo(() => {
+    const dates: string[] = [];
+    const today = toZonedTime(new Date(), tz);
+
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const isoDate = format(d, 'yyyy-MM-dd');
+
+      if (offDaysSet.has(isoDate)) continue;
+
+      const dayOfWeek = d.getDay();
+      const wh = workingHoursByDay[dayOfWeek];
+
+      if (wh?.is_open && wh.start_time && wh.end_time) {
+        const zoned = toZonedTime(d, tz);
+        const label = format(zoned, 'EEEE d MMMM yyyy', { locale: ar });
+        dates.push(isoDate + '|' + label);
+      }
+    }
+    return dates;
+  }, [offDaysSet, workingHoursByDay, tz]);
+
+  // ====================== الأوقات المتاحة لتاريخ معين ======================
+  const getAvailableTimesForDate = useCallback((selectedDate: string | null) => {
+    if (!selectedDate) return [];
+
+    const dateObj = parse(selectedDate, 'yyyy-MM-dd', new Date());
+    const dayOfWeek = dateObj.getDay();
+    const wh = workingHoursByDay[dayOfWeek];
+
+    if (!wh || !wh.is_open || !wh.start_time || !wh.end_time) return [];
+
+    const startTime = wh.start_time;
+    const endTime = wh.end_time;
+    const slotMin = wh.slot_duration_minutes ?? 15;
+
+    const baseDate = parse(selectedDate, 'yyyy-MM-dd', new Date());
+
+    const start = parse(`${selectedDate} ${startTime}`, 'yyyy-MM-dd HH:mm:ss', baseDate);
+    const end = parse(`${selectedDate} ${endTime}`, 'yyyy-MM-dd HH:mm:ss', baseDate);
+
+    let current = start.getTime();
+    const endMs = end.getTime();
+
+    const breakStartMs = wh.break_start
+      ? parse(`${selectedDate} ${wh.break_start}`, 'yyyy-MM-dd HH:mm:ss', baseDate).getTime()
+      : Infinity;
+
+    const breakEndMs = wh.break_end
+      ? parse(`${selectedDate} ${wh.break_end}`, 'yyyy-MM-dd HH:mm:ss', baseDate).getTime()
+      : -Infinity;
+
+    const times: string[] = [];
+
+    while (current < endMs) {
+      const slotEnd = current + slotMin * 60 * 1000;
+
+      if (slotEnd > breakStartMs && current < breakEndMs) {
+        current = breakEndMs;
+        continue;
+      }
+
+      const slotDate = new Date(current);
+
+      const isToday =
+        dateObj.getFullYear() === now.getFullYear() &&
+        dateObj.getMonth() === now.getMonth() &&
+        dateObj.getDate() === now.getDate();
+
+      if (isToday && slotDate < now) {
+        current += slotMin * 60 * 1000;
+        continue;
+      }
+
+      const timeStr = format(slotDate, 'HH:mm');
+
+      const isBooked = appointments.some((a) => {
+        if (!a.date_time || a.status === 'cancelled') return false;
+        if (editingId && a.id === editingId) return false;
+
+        const apptDate = getDateOnly(a.date_time);
+        const apptTime = getTimeOnly(a.date_time);
+
+        return apptDate === selectedDate && apptTime === timeStr;
+      });
+
+      if (!isBooked) {
+        let display = format(slotDate, 'hh:mm a')
+          .replace('AM', 'صباحاً')
+          .replace('PM', 'مساءً');
+        times.push(timeStr + '|' + display);
+      }
+
+      current += slotMin * 60 * 1000;
+    }
+
+    return times;
+  }, [appointments, editingId, workingHoursByDay, now, getDateOnly, getTimeOnly]);
+
+  // ====================== دوال التحكم ======================
+  const toggleEdit = (id: string, appt: Appointment) => {
+  if (editingId === id) {
+    setEditingId(null);
+    setFormValues({});
+    setOriginalValues({});
+    setFormErrors({});
+  } else {
+
+    const values = {
+      full_name: appt.full_name || '',
+      phone: appt.phone || '',
+      date: getDateOnly(appt.date_time),
+      time: getTimeOnly(appt.date_time),
+      status: appt.status || 'confirmed',
+    };
+
+    setEditingId(id);
+    setFormValues(values);
+    setOriginalValues(values); // 🔥 حفظ القيم الأصلية
+    setFormErrors({});
+  }
+};
+
+  const toggleAdd = () => {
+    if (isAdding) {
+      setIsAdding(false);
+      setFormValues({});
+      setFormErrors({});
+    } else {
+      setIsAdding(true);
+      setFormValues({
+        full_name: '',
+        phone: '',
+        date: '',
+        time: '',
+        status: 'confirmed',
+        reason: '',
+      });
+      setFormErrors({});
+    }
+  };
+
+  const getStatusText = (status: string | null) => {
+    const map: Record<string, string> = {
+      pending: 'معلق',
+      confirmed: 'مؤكد',
+      cancelled: 'ملغي',
+      rescheduled: 'معاد جدولته',
+      completed: 'مكتمل',
+      absent: 'متغيب',
+    };
+    return map[status ?? 'confirmed'] ?? 'مؤكد';
+  };
+
+  const handleUpdate = async (formData: FormData) => {
+    setIsSubmitting(true);
+    setFormErrors({});
+
+    const appointmentId = formData.get('appointment_id') as string;
+    const original = appointments.find((a) => a.id === appointmentId);
+
+    setAppointments((prev) =>
+      prev.map((a) =>
+        a.id === appointmentId
+          ? {
+              ...a,
+              full_name: formData.get('full_name') as string | null,
+              phone: formData.get('phone') as string | null,
+              status: formData.get('status') as string | null,
+            }
+          : a
+      )
+    );
+
+    const result = await updateAppointment(formData, timezone);
+
+    if ('errors' in result) {
+      setFormErrors(result.errors as Record<string, string>);
+      if (original) {
+        setAppointments((prev) =>
+          prev.map((a) => (a.id === appointmentId ? original : a))
+        );
+      }
+      setToast(Object.values(result.errors ?? {})[0] || 'بيانات غير صحيحة ❌');
+    } else if ('success' in result) {
+      const fresh = await fetchTodayAppointments(timezone, currentPage, pageSize);
+      if ('appointments' in fresh) {
+        setAppointments(fresh.appointments ?? []);
+      }
+      setEditingId(null);
+      setFormValues({});
+      setFormErrors({});
+      setToast('تم التحديث بنجاح ✅');
+    } else if ('error' in result) {
+      setToast((result as any).error || 'حدث خطأ ❗️');
+      if (original) {
+        setAppointments((prev) =>
+          prev.map((a) => (a.id === appointmentId ? original : a))
+        );
+      }
+    } else {
+      setToast('حدث خطأ غير متوقع ❗️');
+    }
+
+    setIsSubmitting(false);
+  };
+
+  const handleInsert = async (formData: FormData) => {
+    setIsSubmitting(true);
+    setFormErrors({});
+
+    const tempId = 'temp-' + Date.now();
+    const optimistic = {
+      id: tempId,
+      full_name: formData.get('full_name') as string | null,
+      phone: formData.get('phone') as string | null,
+      date_time: null,
+      reason: formData.get('reason') as string | null,
+      status: (formData.get('status') as string) ?? 'confirmed',
+    };
+
+    setAppointments((prev) => [optimistic, ...prev]);
+
+    const result = await insertAppointment(formData, timezone);
+
+    if ('errors' in result) {
+      setFormErrors(result.errors as Record<string, string>);
+      setAppointments((prev) => prev.filter((a) => a.id !== tempId));
+      setToast(Object.values(result.errors ?? {})[0] || 'بيانات غير صحيحة ❌');
+    } else if ('success' in result) {
+      const fresh = await fetchTodayAppointments(timezone, currentPage, pageSize);
+      if ('appointments' in fresh) setAppointments(fresh.appointments ?? []);
+      setIsAdding(false);
+      setFormValues({});
+      setFormErrors({});
+      setToast('تم إضافة الموعد بنجاح ✅');
+    } else {
+      setToast((result as any).error || 'حدث خطأ ❗️');
+      setAppointments((prev) => prev.filter((a) => a.id !== tempId));
+    }
+
+    setIsSubmitting(false);
+  };
+
+  // ====================== حساب الصفحات ======================
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const maxPagesToShow = 7;
+
+  let startPage: number;
+  let endPage: number;
+
+  if (totalPages <= maxPagesToShow) {
+    startPage = 1;
+    endPage = totalPages;
+  } else {
+    const half = Math.floor(maxPagesToShow / 2);
+    startPage = Math.max(1, currentPage - half);
+    endPage = Math.min(totalPages, currentPage + half);
+
+    if (startPage === 1) {
+      endPage = maxPagesToShow;
+    } else if (endPage === totalPages) {
+      startPage = totalPages - maxPagesToShow + 1;
+    }
+  }
+
+  const pages = Array.from(
+    { length: endPage - startPage + 1 },
+    (_, i) => startPage + i
+  );
 
   return (
     <>
-      {state.message && (
-        <div
-          className={`bookingform-message ${
-            state.success ? 'success' : 'error'
-          }`}
+      <div className="appointments__actions">
+        <button
+          type="button"
+          onClick={toggleAdd}
+          className={`btn btn--${isAdding ? 'danger' : 'success'}`}
         >
-          {state.message}
+          {isAdding ? 'إلغاء الإضافة' : '+ إضافة موعد جديد'}
+        </button>
+
+        <div
+          style={{
+            width: '44px',
+            height: '44px',
+            minWidth: '44px',
+            minHeight: '44px',
+            flexShrink: 0,
+            flexGrow: 0,
+            display: 'inline-block',
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleRefresh}
+            className={`btn btn--refresh ${isRefreshing ? 'is-loading' : ''}`}
+            style={{
+              width: '100% !important',
+              height: '100% !important',
+              minWidth: '100%',
+              minHeight: '100%',
+              padding: 0,
+              margin: 0,
+              boxSizing: 'border-box',
+            }}
+            disabled={isRefreshing}
+          >
+            <svg
+              className="refresh-icon-svg"
+              style={{ width: '24px', height: '24px', flexShrink: 0 }}
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* نموذج إضافة موعد جديد */}
+      {isAdding && (
+        <div className="appointment-form appointment-form--new">
+          <h3 className="appointment-form__title">إضافة موعد جديد</h3>
+
+          <form action={handleInsert} id="add-appointment-form">
+            <div className="form-grid">
+              <div className="form-field">
+                <label className="form-label">الاسم الكامل</label>
+                <input
+                  type="text"
+                  name="full_name"
+                  value={formValues.full_name || ''}
+                  onChange={(e) => {
+                    setFormValues({ ...formValues, full_name: e.target.value });
+                    setFormErrors((prev) => ({ ...prev, full_name: '' }));
+                  }}
+                  className={`form-input ${formErrors.full_name ? 'form-input--error' : ''}`}
+                  placeholder="الاسم الكامل"
+                />
+                {formErrors.full_name && <p className="form-error">{formErrors.full_name}</p>}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">رقم التليفون</label>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={formValues.phone || ''}
+                  onChange={(e) => {
+                    setFormValues({ ...formValues, phone: e.target.value });
+                    setFormErrors((prev) => ({ ...prev, phone: '' }));
+                  }}
+                  className={`form-input ${formErrors.phone ? 'form-input--error' : ''}`}
+                  placeholder="01xxxxxxxxx"
+                />
+                {formErrors.phone && <p className="form-error">{formErrors.phone}</p>}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">التاريخ</label>
+                <select
+                  name="date"
+                  value={formValues.date || ''}
+                  onChange={(e) => setFormValues({ ...formValues, date: e.target.value, time: '' })}
+                  className={`form-select ${formErrors.date ? 'form-select--error' : ''}`}
+                >
+                  <option value="">اختر التاريخ</option>
+                  {availableDates.map((d) => {
+                    const [iso, label] = d.split('|');
+                    return (
+                      <option key={iso} value={iso}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+                {formErrors.date && <p className="form-error">{formErrors.date}</p>}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">الوقت</label>
+                <select
+                  name="time"
+                  value={formValues.time || ''}
+                  onChange={(e) => setFormValues({ ...formValues, time: e.target.value })}
+                  className={`form-select ${formErrors.time ? 'form-select--error' : ''}`}
+                  disabled={!formValues.date}
+                >
+                  <option value="">اختر الوقت</option>
+                  {getAvailableTimesForDate(formValues.date).map((t) => {
+                    const [iso, label] = t.split('|');
+                    return (
+                      <option key={iso} value={iso}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+                {formErrors.time && <p className="form-error">{formErrors.time}</p>}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">السبب (اختياري)</label>
+                <input
+                  type="text"
+                  name="reason"
+                  value={formValues.reason || ''}
+                  onChange={(e) => setFormValues({ ...formValues, reason: e.target.value })}
+                  className="form-input"
+                  placeholder="سبب الحجز"
+                />
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">الحالة</label>
+                <select
+                  name="status"
+                  value={formValues.status || 'confirmed'}
+                  onChange={(e) => setFormValues({ ...formValues, status: e.target.value })}
+                  className={`form-select form-select--status-${formValues.status || 'confirmed'}`}
+                >
+                  <option value="pending">معلق</option>
+                  <option value="confirmed">مؤكد</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button type="button" onClick={toggleAdd} className="btn btn--secondary">
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`btn btn--primary ${isSubmitting ? 'btn--disabled' : ''}`}
+              >
+                {isSubmitting ? 'جاري الإضافة...' : 'حفظ الموعد'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
-      <form action={formAction} className="bookingform-form">
-        {/* أقل وقت للحجز */}
-        <div className="bookingform-form__group">
-          <label
-            htmlFor="min_booking_notice_minutes"
-            className="bookingform-form__label"
-          >
-            أقل وقت قبل الحجز
-          </label>
-
-          <select
-            id="min_booking_notice_minutes"
-            name="min_booking_notice_minutes"
-            defaultValue={initialMinNotice}
-            className="bookingform-form__select"
-            disabled={pending}
-          >
-            {MIN_NOTICE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+      {/* الجدول */}
+      {sortedAppointments.length === 0 && !isAdding ? (
+        <div className="no-appointments">
+          لا توجد مواعيد مسجلة حاليًا (اليوم أو المستقبل)
         </div>
+      ) : (
+        <div className="appointments-table-wrapper">
+          <div className="table-container">
+            <table className="appointments-table">
+              <thead>
+                <tr>
+                  <th>الاسم</th>
+                  <th>التليفون</th>
+                  <th>التاريخ</th>
+                  <th>الوقت</th>
+                  <th>السبب</th>
+                  <th>الحالة</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedAppointments.map((appt) => {
+                  // ================================================================
+                  // 👇👇👇 نفس الـ Grace Period المستخدم في الترتيب (للتنسيق البصري)
+                  const GRACE_PERIOD_MINUTES = 5;   // ←←← غيّر الرقم هنا أيضاً بنفس القيمة
+                  const isPast =
+                    appt.date_time &&
+                    toZonedTime(appt.date_time, tz).getTime() + GRACE_PERIOD_MINUTES * 60 * 1000 <
+                      now.getTime();
+                  // ================================================================
 
-        {/* عدد الأيام المسموح بالحجز خلالها */}
-        <div className="bookingform-form__group">
-          <label
-            htmlFor="booking_days_ahead"
-            className="bookingform-form__label"
-          >
-            السماح بالحجز حتى
-          </label>
+                  const isEditing = editingId === appt.id;
+                  const formId = `form-${appt.id}`;
+                  const currentDate = isEditing ? formValues.date : getDateOnly(appt.date_time);
+                  const availTimes = isEditing ? getAvailableTimesForDate(currentDate) : [];
+                  const hasChanges =
+                   formValues.full_name !== originalValues.full_name ||
+                   formValues.phone !== originalValues.phone ||
+                   formValues.date !== originalValues.date ||
+                   formValues.time !== originalValues.time ||
+                   formValues.status !== originalValues.status;
 
-          <select
-            id="booking_days_ahead"
-            name="booking_days_ahead"
-            defaultValue={initialDaysAhead}
-            className="bookingform-form__select"
-            disabled={pending}
-          >
-            {DAYS_AHEAD_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {value} يوم
-              </option>
-            ))}
-          </select>
+                  return (
+                    <tr
+                      key={appt.id}
+                      className={`appointment-row
+                        ${isEditing ? 'appointment-row--editing' : ''}
+                        ${isPast ? 'appointment-row--past' : ''}`}
+                    >
+                      <td>
+                        {isEditing ? (
+                          <div className="input-wrapper">
+                            <input
+                              type="text"
+                              name="full_name"
+                              form={formId}
+                              value={formValues.full_name || ''}
+                              onChange={(e) => {
+                                setFormValues({ ...formValues, full_name: e.target.value });
+                                setFormErrors((prev) => ({ ...prev, full_name: '' }));
+                              }}
+                              placeholder="الاسم الكامل"
+                              className={`form-input ${formErrors.full_name ? 'form-input--error' : ''}`}
+                            />
+                            {formErrors.full_name && (
+                              <span className="form-error">{formErrors.full_name}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="cell-content">{appt.full_name || '—'}</span>
+                        )}
+                      </td>
+
+                      <td>
+                        {isEditing ? (
+                          <div className="input-wrapper">
+                            <input
+                              type="tel"
+                              name="phone"
+                              form={formId}
+                              value={formValues.phone || ''}
+                              onChange={(e) => {
+                                setFormValues({ ...formValues, phone: e.target.value });
+                                setFormErrors((prev) => ({ ...prev, phone: '' }));
+                              }}
+                              placeholder="01xxxxxxxxx أو +201..."
+                              className={`form-input ${formErrors.phone ? 'form-input--error' : ''}`}
+                            />
+                            {formErrors.phone && (
+                              <span className="form-error">{formErrors.phone}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="cell-content">{appt.phone || '—'}</span>
+                        )}
+                      </td>
+
+                      <td>
+                        {isEditing ? (
+                          <select
+                            name="date"
+                            form={formId}
+                            value={formValues.date || ''}
+                            onChange={(e) =>
+                              setFormValues({ ...formValues, date: e.target.value, time: '' })
+                            }
+                            className="form-select"
+                          >
+                            <option value="">اختر تاريخاً</option>
+                            {availableDates.map((d) => {
+                              const [iso, label] = d.split('|');
+                              return (
+                                <option key={iso} value={iso}>
+                                  {label}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        ) : (
+                          <span className="cell-content">
+                            {formatDateLocal(appt.date_time)}
+                          </span>
+                        )}
+                      </td>
+
+                      <td>
+                        {isEditing ? (
+                          <select
+                            name="time"
+                            form={formId}
+                            value={formValues.time || ''}
+                            onChange={(e) => setFormValues({ ...formValues, time: e.target.value })}
+                            className="form-select"
+                          >
+                            <option value="">اختر وقتاً</option>
+                            {availTimes.map((t) => {
+                              const [iso, label] = t.split('|');
+                              return (
+                                <option key={iso} value={iso}>
+                                  {label}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        ) : (
+                          <span className="cell-content">
+                            {formatTimeLocal(appt.date_time)}
+                          </span>
+                        )}
+                      </td>
+
+                      <td>
+                        <span className="cell-content">{appt.reason || '—'}</span>
+                      </td>
+
+                      <td>
+                        {isEditing ? (
+                          <select
+                            name="status"
+                            form={formId}
+                            value={formValues.status || 'confirmed'}
+                            onChange={(e) => setFormValues({ ...formValues, status: e.target.value })}
+                            className={`form-select form-select--status-${formValues.status || 'confirmed'}`}
+                          >
+                            <option value="pending">معلق</option>
+                            <option value="confirmed">مؤكد</option>
+                            <option value="rescheduled">معاد جدولته</option>
+                            <option value="completed">مكتمل</option>
+                            <option value="cancelled">ملغي</option>
+                            <option value="absent">متغيب</option>
+                          </select>
+                        ) : (
+                          <span className={`status-badge status-badge--${appt.status || 'confirmed'}`}>
+                            {getStatusText(appt.status)}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="actions-cell">
+                        {isEditing ? (
+                          <div className="edit-actions">
+                            <button
+                             type="submit"
+                             form={formId}
+                             disabled={isSubmitting || !hasChanges}
+                             className={`btn btn--save ${(isSubmitting || !hasChanges) ? 'btn--disabled' : ''}`}
+                            >
+                              {isSubmitting ? 'جاري الحفظ...' : 'حفظ'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleEdit(appt.id, appt)}
+                              className="btn btn--cancel"
+                            >
+                              رجوع
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleEdit(appt.id, appt)}
+                            className="btn btn--edit"
+                          >
+                            تعديل
+                          </button>
+                        )}
+
+                        <form id={formId} action={handleUpdate} className="form--hidden">
+                          <input type="hidden" name="appointment_id" value={appt.id} />
+                        </form>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
+      )}
 
-        <button
-          type="submit"
-          className="bookingform-form__submit"
-          disabled={pending}
-        >
-          {pending ? 'جاري الحفظ...' : 'حفظ التغييرات'}
-        </button>
-      </form>
+      {/* الـ Pagination */}
+      {totalCount > 0 && (
+        <div className="pagination-container">
+          <div className="pagination">
+            <button
+              className="pagination-btn"
+              disabled={currentPage === 1}
+              onClick={() => router.push(`/dashboard/today-appointments?page=1`)}
+            >
+              الأولى
+            </button>
+
+            <button
+              className="pagination-btn"
+              disabled={currentPage === 1}
+              onClick={() => router.push(`/dashboard/today-appointments?page=${currentPage - 1}`)}
+            >
+              السابق
+            </button>
+
+            {startPage > 1 && (
+              <>
+                <button
+                  className="pagination-btn"
+                  onClick={() => router.push(`/dashboard/today-appointments?page=1`)}
+                >
+                  1
+                </button>
+                {startPage > 2 && <span className="pagination-ellipsis">...</span>}
+              </>
+            )}
+
+            {pages.map((p) => (
+              <button
+                key={p}
+                className={`pagination-btn ${p === currentPage ? 'active' : ''}`}
+                onClick={() => router.push(`/dashboard/today-appointments?page=${p}`)}
+              >
+                {p}
+              </button>
+            ))}
+
+            {endPage < totalPages && (
+              <>
+                {endPage < totalPages - 1 && <span className="pagination-ellipsis">...</span>}
+                <button
+                  className="pagination-btn"
+                  onClick={() => router.push(`/dashboard/today-appointments?page=${totalPages}`)}
+                >
+                  {totalPages}
+                </button>
+              </>
+            )}
+
+            <button
+              className="pagination-btn"
+              disabled={currentPage === totalPages}
+              onClick={() => router.push(`/dashboard/today-appointments?page=${currentPage + 1}`)}
+            >
+              التالي
+            </button>
+
+            <button
+              className="pagination-btn"
+              disabled={currentPage === totalPages}
+              onClick={() => router.push(`/dashboard/today-appointments?page=${totalPages}`)}
+            >
+              الأخيرة
+            </button>
+          </div>
+
+          <div className="pagination-info">
+            عرض {(currentPage - 1) * pageSize + 1} – {Math.min(currentPage * pageSize, totalCount)} من أصل {totalCount} موعد
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
     </>
   );
+                      }
+
+// app/dashboard/today-appointments/page.tsx
+
+import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
+import { supabaseServer } from '@/lib/supabaseServer';
+import TodayAppointmentsTable from './TodayAppointmentsTable';
+import { fetchTodayAppointments, getBusinessTimezone } from '../actions';
+
+export const dynamic = 'force-dynamic';
+
+interface Props {
+  searchParams: { [key: string]: string | string[] | undefined };
 }
 
+export default async function TodayAppointmentsPage({ searchParams }: Props) {
+  const { userId } = await auth();
 
-
-
-
-// app/dashboard/settings/bookingformsettings/actions.ts
-
-'use server';
-
-import { supabaseServer } from '@/lib/supabaseServer';
-import { revalidatePath } from 'next/cache';
-
-export type FormState = {
-  success: boolean;
-  message: string;
-};
-
-export async function updateBookingFormSettings(
-  prevState: FormState,
-  formData: FormData
-): Promise<FormState> {
-
-  const minNotice = Number(formData.get('min_booking_notice_minutes'));
-  const daysAhead = Number(formData.get('booking_days_ahead'));
-
-  if (!minNotice || !daysAhead) {
-    return {
-      success: false,
-      message: 'البيانات غير صالحة',
-    };
+  if (!userId) {
+    redirect('/sign-in');
   }
 
-  try {
+  const pageParam = Array.isArray(searchParams.page)
+  ? searchParams.page[0]
+  : searchParams.page;
 
-    const { error } = await supabaseServer
-      .from('business_settings')
-      .update({
-        min_booking_notice_minutes: minNotice,
-        booking_days_ahead: daysAhead,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1);
+const pageSizeParam = Array.isArray(searchParams.pageSize)
+  ? searchParams.pageSize[0]
+  : searchParams.pageSize;
 
-    if (error) {
-      console.error('Supabase update error:', error);
+const currentPage = Math.max(1, Number(pageParam) || 1);
+const pageSize = Math.max(1, Number(pageSizeParam) || 20);
 
-      return {
-        success: false,
-        message: 'فشل حفظ الإعدادات',
-      };
-    }
+  const timezone = await getBusinessTimezone();
 
-    revalidatePath('/dashboard/settings/bookingformsettings');
+  const appointmentsResult = await fetchTodayAppointments(
+    timezone,
+    currentPage,
+    pageSize
+  );
 
-    return {
-      success: true,
-      message: 'تم حفظ الإعدادات بنجاح',
-    };
-
-  } catch (err) {
-
-    console.error(err);
-
-    return {
-      success: false,
-      message: 'حدث خطأ أثناء الحفظ',
-    };
+  if ('error' in appointmentsResult) {
+    return (
+      <div className="no-appointments">
+        حدث خطأ أثناء جلب المواعيد
+        <br />
+        <small>{appointmentsResult.error}</small>
+      </div>
+    );
   }
+
+  const { appointments, totalCount } = appointmentsResult;
+
+  // جلب أيام الإجازة
+  const { data: offDaysData } = await supabaseServer
+    .from('off_days')
+    .select('date');
+
+  // جلب ساعات العمل
+  const { data: workingHours } = await supabaseServer
+    .from('working_hours')
+    .select(
+      'day_of_week, is_open, start_time, end_time, slot_duration_minutes, break_start, break_end'
+    );
+
+  const offDays = offDaysData?.map((row) => row.date) || [];
+
+  return (
+    <div>
+      <TodayAppointmentsTable
+        initialAppointments={appointments || []}
+        initialOffDays={offDays}
+        initialWorkingHours={workingHours || []}
+        timezone={timezone}
+        currentPage={currentPage}
+        pageSize={pageSize}
+        totalCount={totalCount}
+      />
+    </div>
+  );
 }
